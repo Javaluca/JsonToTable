@@ -1,3 +1,4 @@
+# Builds and tests the app, publishes it to GitHub Pages, and (on a v* tag) cuts a Release.
 name: Release
 
 on:
