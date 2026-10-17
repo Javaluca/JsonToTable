@@ -46,4 +46,36 @@ describe('App', () => {
     )
     expect(screen.getByText('Matching 5 of 5 Records')).toBeInTheDocument()
   })
+
+  it('shows the input and table panels singularly or together', async () => {
+    render(<App />)
+
+    await userEvent.click(
+      screen.getByRole('button', { name: /load sample data/i }),
+    )
+    await screen.findByText('Matching 5 of 5 Records')
+
+    await userEvent.click(screen.getByRole('button', { name: 'Table' }))
+    expect(
+      screen.queryByLabelText(/paste a json array/i),
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('Matching 5 of 5 Records')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Input' }))
+    expect(
+      screen.queryByLabelText(/paste a json array/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: /load sample data/i }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByText('Matching 5 of 5 Records'),
+    ).not.toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'Both' }))
+    expect(
+      screen.queryByLabelText(/paste a json array/i),
+    ).toBeInTheDocument()
+    expect(screen.getByText('Matching 5 of 5 Records')).toBeInTheDocument()
+  })
 })
