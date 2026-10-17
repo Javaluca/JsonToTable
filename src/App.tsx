@@ -6,41 +6,43 @@ import {
   useState,
   type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
 } from 'react'
 import {
   AllCommunityModule,
   ModuleRegistry,
   type ColDef,
+  type RowClassParams,
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
+import ActionsMenu from './ActionsMenu'
 import { compileQuery } from './compile-query'
+import { colorForIndex, SAMPLE_COLOR } from './dataset-colors'
+import DatasetEditorDialog from './DatasetEditorDialog'
+import DatasetMenu from './DatasetMenu'
 import { createDatasetStore, type DatasetStore } from './dataset-store'
 import { createDatasetSource } from './dataset-source'
 import { deriveColumns } from './derive-columns'
+import FieldsMenu from './FieldsMenu'
+import { copyText, downloadText } from './files'
+import { InputIcon, InspectorIcon, TableIcon } from './Icons'
 import JsonEditor from './JsonEditor'
+import Landing from './Landing'
 import type { JsonRecord } from './parse-dataset'
+import { refineQuery } from './query-clause'
+import RecordPanel from './RecordPanel'
+import ResizeHandle from './ResizeHandle'
 import { SAMPLE_DATASET } from './sample-data'
+import { downloadName, toJsonText } from './serialize'
 import { suggestQuery } from './suggest-query'
+import { gridThemeDark, gridThemeLight } from './theme'
 import './styles.css'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const LIQE_DOCS_URL = 'https://github.com/gnavli/liqe'
 const SUGGESTIONS_LIST_ID = 'query-suggestions'
-const EDITOR_LABEL = 'Paste a JSON array or NDJSON'
-const DEFAULT_INPUT_WIDTH = 360
-const MIN_INPUT_WIDTH = 220
-const MIN_TABLE_WIDTH = 320
-const KEYBOARD_RESIZE_STEP = 16
 
-type View = 'input' | 'table' | 'both'
-
-const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
-  { id: 'input', label: 'Input' },
-  { id: 'table', label: 'Table' },
-  { id: 'both', label: 'Both' },
-]
+const SAMPLE_TEXT = JSON.stringify(SAMPLE_DATASET, null, 2)
 
 function suggestionOptionId(index: number): string {
   return `query-suggestion-${index}`
@@ -52,14 +54,27 @@ function formatCellValue(value: unknown): string {
   return String(value)
 }
 
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(Math.max(value, min), max)
+function useIsDark(): boolean {
+  const [dark, setDark] = useState(() => {
+    if (typeof window.matchMedia !== 'function') return false
+    return window.matchMedia('(prefers-color-scheme: dark)').matches
+  })
+
+  useEffect(() => {
+    if (typeof window.matchMedia !== 'function') return
+    const query = window.matchMedia('(prefers-color-scheme: dark)')
+    const onChange = () => setDark(query.matches)
+    query.addEventListener('change', onChange)
+    return () => query.removeEventListener('change', onChange)
+  }, [])
+
+  return dark
 }
 
 export default function App() {
-  const [view, setView] = useState<View>('both')
-  const [inputWidth, setInputWidth] = useState(DEFAULT_INPUT_WIDTH)
   const [editorText, setEditorText] = useState('')
+  const [editorName, setEditorName] = useState('')
+  const [editorOpen, setEditorOpen] = useState(false)
   const [records, setRecords] = useState<JsonRecord[] | null>(null)
   const [matched, setMatched] = useState<JsonRecord[]>([])
   const [isParsing, setIsParsing] = useState(false)
@@ -68,12 +83,24 @@ export default function App() {
   const [queryCaret, setQueryCaret] = useState(0)
   const [queryError, setQueryError] = useState<string | null>(null)
   const [activeSuggestion, setActiveSuggestion] = useState(0)
-  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(true)
+  const [selectedRecord, setSelectedRecord] = useState<JsonRecord | null>(null)
+  const [inputOpen, setInputOpen] = useState(true)
+  const [tableOpen, setTableOpen] = useState(true)
+  const [inspectorOpen, setInspectorOpen] = useState(false)
+  const [inputWidth, setInputWidth] = useState(340)
+  const [inspectorWidth, setInspectorWidth] = useState(320)
+  const [sourceText, setSourceText] = useState('')
+  const [sourceError, setSourceError] = useState<string | null>(null)
+  const [meterReady, setMeterReady] = useState(false)
+  const [copiedResult, setCopiedResult] = useState(false)
+  const isDark = useIsDark()
   const sourceRef = useRef(createDatasetSource())
   const storeRef = useRef<DatasetStore | undefined>(undefined)
-  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
   const queryInputRef = useRef<HTMLInputElement>(null)
   const pendingCaretRef = useRef<number | null>(null)
+  const queryMemoryRef = useRef(new Map<string, string>())
+  const copyTimerRef = useRef<number | undefined>(undefined)
 
   if (storeRef.current === undefined) {
     storeRef.current = createDatasetStore(window.localStorage)
@@ -82,6 +109,33 @@ export default function App() {
 
   const [datasets, setDatasets] = useState(() => store.list())
   const [activeId, setActiveId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const id = window.requestAnimationFrame(() => setMeterReady(true))
+    return () => window.cancelAnimationFrame(id)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      sourceRef.current.cancel()
+      window.clearTimeout(copyTimerRef.current)
+    }
+  }, [])
+
+  const runQuery = useCallback((all: JsonRecord[], text: string) => {
+    if (text.trim() === '') {
+      setQueryError(null)
+      setMatched(all)
+      return
+    }
+    const compiled = compileQuery(text)
+    if (!compiled.ok) {
+      setQueryError(compiled.error)
+      return
+    }
+    setQueryError(null)
+    setMatched(all.filter((record) => compiled.test(record)))
+  }, [])
 
   const parseInto = useCallback(
     async (text: string): Promise<JsonRecord[] | null> => {
@@ -100,60 +154,194 @@ export default function App() {
     [],
   )
 
-  const addDataset = useCallback(
-    async (text: string) => {
-      const parsed = await parseInto(text)
-      if (parsed === null) return
-      const entries = store.add(text, parsed.length)
-      setDatasets(entries)
-      setActiveId(entries[0].id)
-    },
-    [parseInto, store],
-  )
-
   const activateDataset = useCallback(
     async (id: string) => {
       const entry = datasets.find((candidate) => candidate.id === id)
       if (entry === undefined) return
       setEditorText(entry.text)
+      setSourceText(entry.text)
+      setSourceError(null)
       const parsed = await parseInto(entry.text)
-      if (parsed !== null) setActiveId(id)
+      if (parsed === null) return
+      setActiveId(id)
+      setSelectedRecord(null)
+      const remembered = queryMemoryRef.current.get(id) ?? ''
+      setQueryText(remembered)
+      runQuery(parsed, remembered)
     },
-    [datasets, parseInto],
+    [datasets, parseInto, runQuery],
   )
+
+  const loadIntoStore = useCallback(
+    async (text: string, name?: string): Promise<boolean> => {
+      const parsed = await parseInto(text)
+      if (parsed === null) return false
+      const entries = store.add(text, parsed.length, name)
+      setDatasets(entries)
+      setActiveId(entries[0].id)
+      setSourceText(text)
+      setSourceError(null)
+      setSelectedRecord(null)
+      setQueryText('')
+      setQueryError(null)
+      queryMemoryRef.current.delete(entries[0].id)
+      setEditorOpen(false)
+      return true
+    },
+    [parseInto, store],
+  )
+
+  const uploadFile = useCallback(
+    (file: File) => {
+      void file.text().then(async (text) => {
+        setEditorText(text)
+        const ok = await loadIntoStore(text, editorName)
+        if (!ok) setEditorOpen(true)
+      })
+    },
+    [editorName, loadIntoStore],
+  )
+
+  const loadSample = useCallback(() => {
+    setEditorText(SAMPLE_TEXT)
+    void loadIntoStore(SAMPLE_TEXT)
+  }, [loadIntoStore])
 
   useEffect(() => {
     const [mostRecent] = store.list()
-    if (mostRecent !== undefined) void activateDataset(mostRecent.id)
+    if (mostRecent !== undefined) {
+      void activateDataset(mostRecent.id)
+      return
+    }
+    if (new URLSearchParams(window.location.search).get('dataset') === 'sample') {
+      loadSample()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const cancelParsing = useCallback(() => {
-    sourceRef.current.cancel()
+  const openEditor = useCallback((text: string) => {
+    setEditorText(text)
+    setEditorName('')
+    setLoadError(null)
+    setEditorOpen(true)
+  }, [])
+
+  const openNewEditor = useCallback(() => openEditor(''), [openEditor])
+
+  const closeEditor = useCallback(() => {
+    setEditorOpen(false)
+    setLoadError(null)
+  }, [])
+
+  const applySource = useCallback(async () => {
+    if (activeId === null) return
+    setIsParsing(true)
+    const result = await sourceRef.current.parse(sourceText)
     setIsParsing(false)
+    if (!result.ok) {
+      setSourceError(result.error)
+      return
+    }
+    setSourceError(null)
+    setRecords(result.records)
+    setSelectedRecord(null)
+    const entries = store.update(activeId, sourceText, result.records.length)
+    setDatasets(entries)
+    runQuery(result.records, queryText)
+  }, [activeId, queryText, runQuery, sourceText, store])
+
+  const resizeInput = useCallback((delta: number) => {
+    setInputWidth((width) => Math.min(640, Math.max(220, width + delta)))
   }, [])
 
-  useEffect(() => {
-    return () => sourceRef.current.cancel()
+  const resizeInspector = useCallback((delta: number) => {
+    setInspectorWidth((width) => Math.min(640, Math.max(220, width - delta)))
   }, [])
 
-  const applyQuery = useCallback(
-    (text: string) => {
-      if (records === null) return
-      const compiled = compileQuery(text)
-      if (compiled.ok) {
-        setQueryError(null)
-        setMatched(records.filter((record) => compiled.test(record)))
-      } else {
-        setQueryError(compiled.error)
+  const selectRecord = useCallback((record: JsonRecord) => {
+    setSelectedRecord(record)
+  }, [])
+
+  const inspectRecord = useCallback((record: JsonRecord) => {
+    setSelectedRecord(record)
+    setInspectorOpen(true)
+  }, [])
+
+  const views = { input: inputOpen, table: tableOpen, inspector: inspectorOpen }
+  const visibleViews =
+    (inputOpen ? 1 : 0) + (tableOpen ? 1 : 0) + (inspectorOpen ? 1 : 0)
+  const isLastView = (view: keyof typeof views) =>
+    views[view] && visibleViews === 1
+  const toggleView = (view: keyof typeof views) => {
+    if (isLastView(view)) return
+    if (view === 'input') setInputOpen((open) => !open)
+    else if (view === 'table') setTableOpen((open) => !open)
+    else setInspectorOpen((open) => !open)
+  }
+
+  const removeDataset = useCallback(
+    (id: string) => {
+      const entries = store.remove(id)
+      setDatasets(entries)
+      if (id !== activeId) return
+      const [next] = entries
+      if (next !== undefined) {
+        void activateDataset(next.id)
+        return
       }
+      sourceRef.current.cancel()
+      setActiveId(null)
+      setRecords(null)
+      setMatched([])
+      setSelectedRecord(null)
+      setQueryText('')
+      setQueryError(null)
+      setEditorText('')
+      setEditorName('')
+      setEditorOpen(false)
+      setLoadError(null)
+      setSourceText('')
+      setSourceError(null)
     },
-    [records],
+    [activeId, activateDataset, store],
   )
 
+  const rememberQuery = useCallback((text: string) => {
+    if (activeId === null) return
+    queryMemoryRef.current.set(activeId, text)
+  }, [activeId])
+
+  const putClause = useCallback(
+    (clause: string, run: boolean) => {
+      if (records === null) return
+      const next = refineQuery(queryText, clause)
+      pendingCaretRef.current = next.length
+      setQueryText(next)
+      setQueryCaret(next.length)
+      setSuggestionsDismissed(true)
+      rememberQuery(next)
+      if (run) runQuery(records, next)
+      queryInputRef.current?.focus()
+    },
+    [queryText, records, rememberQuery, runQuery],
+  )
+
+  const narrowTo = useCallback(
+    (clause: string) => putClause(clause, true),
+    [putClause],
+  )
+
+  const clearQuery = useCallback(() => {
+    setQueryText('')
+    setQueryCaret(0)
+    setSuggestionsDismissed(true)
+    rememberQuery('')
+    if (records !== null) runQuery(records, '')
+    queryInputRef.current?.focus()
+  }, [records, rememberQuery, runQuery])
+
   const suggestions = useMemo(
-    () =>
-      records === null ? [] : suggestQuery(records, queryText, queryCaret),
+    () => (records === null ? [] : suggestQuery(records, queryText, queryCaret)),
     [queryCaret, queryText, records],
   )
 
@@ -189,9 +377,7 @@ export default function App() {
     setSuggestionsDismissed(false)
   }
 
-  const handleQueryKeyDown = (
-    event: ReactKeyboardEvent<HTMLInputElement>,
-  ) => {
+  const handleQueryKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
     if (menuOpen) {
       if (event.key === 'ArrowDown') {
         event.preventDefault()
@@ -216,61 +402,30 @@ export default function App() {
         return
       }
     }
-    if (event.key === 'Enter') applyQuery(queryText)
+    if (event.key === 'Enter' && records !== null) {
+      rememberQuery(queryText)
+      runQuery(records, queryText)
+    }
   }
 
-  const maxInputWidth = useCallback(
-    () => Math.max(MIN_INPUT_WIDTH, window.innerWidth - MIN_TABLE_WIDTH),
-    [],
-  )
-
-  const handleSeparatorPointerDown = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    dragRef.current = { startX: event.clientX, startWidth: inputWidth }
-    event.currentTarget.setPointerCapture?.(event.pointerId)
-  }
-
-  const handleSeparatorPointerMove = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    const drag = dragRef.current
-    if (drag === null) return
-    setInputWidth(
-      clamp(
-        drag.startWidth + event.clientX - drag.startX,
-        MIN_INPUT_WIDTH,
-        maxInputWidth(),
-      ),
-    )
-  }
-
-  const handleSeparatorPointerUp = (
-    event: ReactPointerEvent<HTMLDivElement>,
-  ) => {
-    dragRef.current = null
-    event.currentTarget.releasePointerCapture?.(event.pointerId)
-  }
-
-  const handleSeparatorKeyDown = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ) => {
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
-    event.preventDefault()
-    const step =
-      event.key === 'ArrowRight' ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP
-    setInputWidth((width) =>
-      clamp(width + step, MIN_INPUT_WIDTH, maxInputWidth()),
-    )
-  }
-
-  const columnDefs = useMemo<ColDef[]>(
+  const columns = useMemo(
     () => (records === null ? [] : deriveColumns(records)),
     [records],
   )
 
+  const columnDefs = useMemo<ColDef[]>(
+    () =>
+      columns.map((column) => ({
+        field: column.field,
+        type: column.numeric ? 'numericColumn' : undefined,
+      })),
+    [columns],
+  )
+
   const defaultColDef = useMemo<ColDef>(
     () => ({
+      flex: 1,
+      minWidth: 100,
       sortable: true,
       filter: true,
       resizable: true,
@@ -280,151 +435,87 @@ export default function App() {
     [],
   )
 
-  const hasDatasets = records !== null
-  const activeView: View = hasDatasets ? view : 'input'
-  const counterLabel =
-    records === null
-      ? 'No Dataset loaded'
-      : `Matching ${matched.length} of ${records.length} Records`
+  const rowClassRules = useMemo(
+    () => ({
+      'row-picked': (params: RowClassParams) => params.data === selectedRecord,
+    }),
+    [selectedRecord],
+  )
 
-  const showInput = activeView !== 'table'
-  const showTable = activeView !== 'input'
+  const colorById = useMemo(() => {
+    const ordered = [...datasets].sort((a, b) => a.savedAt - b.savedAt)
+    return new Map(
+      ordered.map((entry, index) => [entry.id, colorForIndex(index)]),
+    )
+  }, [datasets])
+
+  const colorOf = useCallback(
+    (id: string) => colorById.get(id) ?? SAMPLE_COLOR,
+    [colorById],
+  )
+
+  const activeEntry = datasets.find((entry) => entry.id === activeId)
+  const loaded = records !== null
+  const recordCount = records?.length ?? 0
+  const ratio = recordCount === 0 ? 0 : matched.length / recordCount
+  const gridTheme = isDark ? gridThemeDark : gridThemeLight
+  const counterLabel = loaded
+    ? `Matching ${matched.length} of ${recordCount} Records`
+    : 'No Dataset loaded'
+  const activeLabel = activeEntry?.label ?? 'No dataset'
+  const activeColor =
+    activeEntry !== undefined ? colorOf(activeEntry.id) : SAMPLE_COLOR
+  const sampleInStore = datasets.some((entry) => entry.text === SAMPLE_TEXT)
+
+  const copyResultSet = () => {
+    if (records === null) return
+    void copyText(toJsonText(matched)).then((ok) => {
+      if (!ok) return
+      setCopiedResult(true)
+      window.clearTimeout(copyTimerRef.current)
+      copyTimerRef.current = window.setTimeout(() => setCopiedResult(false), 1800)
+    })
+  }
+
+  const downloadResultSet = () => {
+    if (records === null) return
+    downloadText(toJsonText(matched), downloadName())
+  }
 
   return (
     <main className="app">
-      <header className="topbar">
-        <h1>JSON Query Table</h1>
-        <div className="view-switch" role="group" aria-label="View">
-          {VIEWS.map((option) => (
-            <button
-              key={option.id}
-              type="button"
-              aria-pressed={activeView === option.id}
-              disabled={!hasDatasets}
-              onClick={() => setView(option.id)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-        <select
-          className="dataset-picker"
-          aria-label="Active Dataset"
-          value={activeId ?? ''}
-          disabled={datasets.length === 0}
-          onChange={(event) => void activateDataset(event.target.value)}
-        >
-          {datasets.length === 0 ? (
-            <option value="">No Datasets</option>
-          ) : (
-            datasets.map((entry) => (
-              <option key={entry.id} value={entry.id}>
-                {entry.label}
-              </option>
-            ))
-          )}
-        </select>
-        <p className="topbar-status" aria-label={counterLabel}>
-          {records === null
-            ? 'No Dataset loaded'
-            : `${matched.length} / ${records.length}`}
-        </p>
-      </header>
-
-      <div className="workspace">
-        {showInput ? (
-          <section
-            className="panel input-panel"
-            style={
-              activeView === 'both' ? { flex: `0 0 ${inputWidth}px` } : undefined
-            }
-          >
-            <p className="panel-title">{EDITOR_LABEL}</p>
-            <div className="editor">
-              <JsonEditor
-                ariaLabel={EDITOR_LABEL}
-                value={editorText}
-                onChange={setEditorText}
+      {loaded ? (
+        <>
+          <header className="toolbar">
+            <div className="toolbar-group toolbar-lead">
+              <DatasetMenu
+                datasets={datasets}
+                activeId={activeId}
+                activeLabel={activeLabel}
+                activeColor={activeColor}
+                showSample={!sampleInStore}
+                colorOf={colorOf}
+                onSelect={(id) => void activateDataset(id)}
+                onRemove={removeDataset}
+                onLoadSample={loadSample}
               />
-            </div>
-            <div className="controls">
               <button
                 type="button"
-                className="primary"
-                disabled={isParsing || editorText.trim() === ''}
-                onClick={() => void addDataset(editorText)}
+                className="control control-primary"
+                onClick={openNewEditor}
               >
-                Load JSON
+                New dataset
               </button>
-              <label className="file-button">
-                Upload file
-                <input
-                  type="file"
-                  accept=".json,.ndjson,application/json,text/plain"
-                  aria-label="Upload a JSON or NDJSON file"
-                  onChange={(event) => {
-                    const file = event.target.files?.[0]
-                    if (file) {
-                      void file.text().then((text) => {
-                        setEditorText(text)
-                        void addDataset(text)
-                      })
-                    }
-                  }}
-                />
-              </label>
-              <button
-                type="button"
-                onClick={() => {
-                  const text = JSON.stringify(SAMPLE_DATASET, null, 2)
-                  setEditorText(text)
-                  void addDataset(text)
-                }}
-              >
-                Load sample data
-              </button>
-              {isParsing ? (
-                <button type="button" onClick={cancelParsing}>
-                  Cancel parsing
-                </button>
-              ) : null}
             </div>
-            {isParsing ? <p className="hint">Parsing Dataset…</p> : null}
-            {loadError !== null ? (
-              <p className="error" role="alert">
-                {loadError}
-              </p>
-            ) : null}
-          </section>
-        ) : null}
 
-        {activeView === 'both' ? (
-          <div
-            className="separator"
-            role="separator"
-            aria-orientation="vertical"
-            aria-label="Resize input panel"
-            aria-valuenow={inputWidth}
-            aria-valuemin={MIN_INPUT_WIDTH}
-            aria-valuemax={maxInputWidth()}
-            tabIndex={0}
-            onPointerDown={handleSeparatorPointerDown}
-            onPointerMove={handleSeparatorPointerMove}
-            onPointerUp={handleSeparatorPointerUp}
-            onKeyDown={handleSeparatorKeyDown}
-          />
-        ) : null}
-
-        {showTable ? (
-          <section className="panel table-panel">
-            <div className="query-bar">
-              <label htmlFor="query-input">Query DSL</label>
+            <div className="toolbar-group toolbar-query">
               <div className="query-field">
                 <input
                   ref={queryInputRef}
-                  id="query-input"
-                  type="search"
+                  className="query-input"
+                  type="text"
                   role="combobox"
+                  aria-label="Query"
                   autoComplete="off"
                   aria-expanded={menuOpen}
                   aria-controls={SUGGESTIONS_LIST_ID}
@@ -433,11 +524,22 @@ export default function App() {
                     menuOpen ? suggestionOptionId(activeSuggestion) : undefined
                   }
                   value={queryText}
-                  placeholder='e.g. address.city:london AND age:>40'
+                  placeholder="e.g. address.city:London AND age:>40"
                   onChange={handleQueryChange}
                   onKeyDown={handleQueryKeyDown}
                   onBlur={() => setSuggestionsDismissed(true)}
                 />
+                {queryText !== '' ? (
+                  <button
+                    type="button"
+                    className="query-clear"
+                    aria-label="Clear query"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={clearQuery}
+                  >
+                    <span aria-hidden="true">×</span>
+                  </button>
+                ) : null}
                 {menuOpen ? (
                   <ul
                     id={SUGGESTIONS_LIST_ID}
@@ -448,6 +550,7 @@ export default function App() {
                     {suggestions.map((suggestion, index) => (
                       <li
                         key={`${suggestion.kind}:${suggestion.value}`}
+                        className="suggestion"
                         id={suggestionOptionId(index)}
                         role="option"
                         aria-label={suggestion.value}
@@ -473,34 +576,200 @@ export default function App() {
                 target="_blank"
                 rel="noreferrer"
               >
+                <span className="docs-glyph" aria-hidden="true">
+                  {'{ }'}
+                </span>
                 syntax
               </a>
             </div>
-            {queryError !== null ? (
-              <p className="error" role="alert">
-                {queryError}
-              </p>
-            ) : null}
-            <p className="hint">Press Enter to run the query.</p>
-            {records === null ? (
-              <p className="empty">
-                No Dataset loaded yet — paste JSON, upload a file, or use the
-                sample data.
-              </p>
-            ) : (
-              <div className="grid">
-                <AgGridReact
-                  rowData={matched}
-                  columnDefs={columnDefs}
-                  defaultColDef={defaultColDef}
-                  rowHeight={24}
-                  headerHeight={28}
-                />
+
+            <div className="toolbar-group toolbar-actions">
+              <ActionsMenu
+                copied={copiedResult}
+                onCopy={copyResultSet}
+                onDownload={downloadResultSet}
+              />
+            </div>
+
+            <div className="toolbar-group toolbar-panels">
+              <div className="view-group" role="group" aria-label="Views">
+                <button
+                  type="button"
+                  className="view-button"
+                  aria-pressed={inputOpen}
+                  aria-label="Input"
+                  title="Input"
+                  disabled={isLastView('input')}
+                  onClick={() => toggleView('input')}
+                >
+                  <InputIcon />
+                </button>
+                <button
+                  type="button"
+                  className="view-button"
+                  aria-pressed={tableOpen}
+                  aria-label="Table"
+                  title="Table"
+                  disabled={isLastView('table')}
+                  onClick={() => toggleView('table')}
+                >
+                  <TableIcon />
+                </button>
+                <button
+                  type="button"
+                  className="view-button"
+                  aria-pressed={inspectorOpen}
+                  aria-label="Inspector"
+                  title="Inspector"
+                  disabled={isLastView('inspector')}
+                  onClick={() => toggleView('inspector')}
+                >
+                  <InspectorIcon />
+                </button>
               </div>
-            )}
-          </section>
-        ) : null}
-      </div>
+            </div>
+          </header>
+
+          <div
+            className={`workspace${tableOpen ? '' : ' workspace--no-table'}`}
+          >
+            {inputOpen ? (
+              <>
+                <section
+                  className="panel input-panel"
+                  aria-label="Input"
+                  style={{ flexBasis: `${inputWidth}px` }}
+                >
+                  <header className="panel-head">
+                    <span>Input</span>
+                    <button
+                      type="button"
+                      className="control control-primary control-sm"
+                      disabled={isParsing}
+                      onClick={() => void applySource()}
+                    >
+                      {isParsing ? 'Parsing…' : 'Apply'}
+                    </button>
+                  </header>
+                  <div className="panel-body">
+                    <JsonEditor
+                      ariaLabel="Dataset source"
+                      value={sourceText}
+                      onChange={setSourceText}
+                      theme={isDark ? 'dark' : 'light'}
+                    />
+                  </div>
+                  {sourceError !== null ? (
+                    <p className="panel-error" role="alert">
+                      {sourceError}
+                    </p>
+                  ) : null}
+                </section>
+                <ResizeHandle label="Resize Input" onResize={resizeInput} />
+              </>
+            ) : null}
+
+            {tableOpen ? (
+              <section className="panel table-panel" aria-label="Result Set">
+                {records.length === 0 ? (
+                  <p className="empty">This Dataset holds no Records.</p>
+                ) : (
+                  <div className="grid">
+                    <AgGridReact
+                      theme={gridTheme}
+                      rowData={matched}
+                      columnDefs={columnDefs}
+                      defaultColDef={defaultColDef}
+                      rowClassRules={rowClassRules}
+                      rowSelection="single"
+                      onRowClicked={(event) => selectRecord(event.data)}
+                      onRowDoubleClicked={(event) =>
+                        inspectRecord(event.data)
+                      }
+                    />
+                  </div>
+                )}
+              </section>
+            ) : null}
+
+            {inspectorOpen ? (
+              <>
+                <ResizeHandle
+                  label="Resize Inspector"
+                  onResize={resizeInspector}
+                />
+                <aside
+                  className="panel inspector-panel"
+                  aria-label="Inspector"
+                  style={{ flexBasis: `${inspectorWidth}px` }}
+                >
+                  <RecordPanel
+                    record={selectedRecord}
+                    inResultSet={
+                      selectedRecord === null || matched.includes(selectedRecord)
+                    }
+                    onNarrow={narrowTo}
+                    onCopy={copyText}
+                  />
+                </aside>
+              </>
+            ) : null}
+          </div>
+
+          <footer className="statusbar">
+            <div className="statusbar-group">
+              <FieldsMenu
+                columns={columns}
+                onPick={(clause) => putClause(clause, false)}
+              />
+              <span className="statusbar-divider" aria-hidden="true" />
+              <div className="status-group">
+                <p className="status" aria-label={counterLabel}>
+                  {`${matched.length} / ${recordCount}`}
+                </p>
+                <span className="meter" aria-hidden="true">
+                  <span
+                    className="meter-fill"
+                    style={{ transform: `scaleX(${meterReady ? ratio : 0})` }}
+                  />
+                </span>
+              </div>
+            </div>
+            <div className="statusbar-group statusbar-tail">
+              {queryError !== null ? (
+                <span className="statusbar-error" role="alert">
+                  {queryError}
+                </span>
+              ) : (
+                <span>
+                  Double-click a row to inspect it. Type a clause and press
+                  Enter to narrow the Result Set.
+                </span>
+              )}
+            </div>
+          </footer>
+        </>
+      ) : (
+        <Landing
+          onLoadSample={loadSample}
+          onPaste={openEditor}
+          onUpload={uploadFile}
+        />
+      )}
+
+      <DatasetEditorDialog
+        open={editorOpen}
+        value={editorText}
+        name={editorName}
+        theme={isDark ? 'dark' : 'light'}
+        isParsing={isParsing}
+        error={loadError}
+        onChange={setEditorText}
+        onNameChange={setEditorName}
+        onLoad={() => void loadIntoStore(editorText, editorName)}
+        onUpload={uploadFile}
+        onClose={closeEditor}
+      />
     </main>
   )
 }

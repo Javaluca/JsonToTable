@@ -1,10 +1,10 @@
 import { deriveColumns } from './derive-columns'
 import { isJsonObject, type JsonRecord } from './parse-dataset'
+import { quoteClauseValue } from './query-clause'
 
 const QUOTED_VALUE = /([\w.-]+):(>=|<=|!=|>|<|=)?"([^"]*)$/
 const BARE_VALUE = /([\w.-]+):(>=|<=|!=|>|<|=)?([^"()\s]*)$/
 const TRAILING_TOKEN = /[^\s()]*$/
-const NEEDS_QUOTING = /[\s"():<>!=]/
 
 const MAX_SUGGESTIONS = 20
 const MAX_CANDIDATES = 500
@@ -57,7 +57,7 @@ function valuesFor(
 ): QuerySuggestion[] {
   return rank(collectValues(records, path), partial).map((text) => ({
     kind: 'value' as const,
-    value: quoteIfNeeded(text),
+    value: quoteClauseValue(text),
     replaceFrom,
     replaceTo,
   }))
@@ -123,8 +123,4 @@ function rank(candidates: string[], partial: string): string[] {
   }
 
   return [...starts, ...contains].slice(0, MAX_SUGGESTIONS)
-}
-
-function quoteIfNeeded(text: string): string {
-  return NEEDS_QUOTING.test(text) ? `"${text}"` : text
 }
