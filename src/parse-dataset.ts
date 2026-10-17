@@ -55,6 +55,6 @@ function parseNdjson(text: string): ParseResult {
   return { ok: true, records }
 }
 
-function isJsonObject(value: unknown): value is JsonRecord {
+export function isJsonObject(value: unknown): value is JsonRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
