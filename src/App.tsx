@@ -4,6 +4,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type ChangeEvent as ReactChangeEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
 } from 'react'
@@ -20,13 +21,13 @@ import { deriveColumns } from './derive-columns'
 import JsonEditor from './JsonEditor'
 import type { JsonRecord } from './parse-dataset'
 import { SAMPLE_DATASET } from './sample-data'
-import { suggestValues } from './suggest-values'
+import { suggestQuery } from './suggest-query'
 import './styles.css'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const LIQE_DOCS_URL = 'https://github.com/gnavli/liqe'
-const SUGGESTIONS_ID = 'query-suggestions'
+const SUGGESTIONS_LIST_ID = 'query-suggestions'
 const EDITOR_LABEL = 'Paste a JSON array or NDJSON'
 const DEFAULT_INPUT_WIDTH = 360
 const MIN_INPUT_WIDTH = 220
@@ -40,6 +41,10 @@ const VIEWS: ReadonlyArray<{ id: View; label: string }> = [
   { id: 'table', label: 'Table' },
   { id: 'both', label: 'Both' },
 ]
+
+function suggestionOptionId(index: number): string {
+  return `query-suggestion-${index}`
+}
 
 function formatCellValue(value: unknown): string {
   if (value === null || value === undefined) return ''
@@ -60,10 +65,15 @@ export default function App() {
   const [isParsing, setIsParsing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [queryText, setQueryText] = useState('')
+  const [queryCaret, setQueryCaret] = useState(0)
   const [queryError, setQueryError] = useState<string | null>(null)
+  const [activeSuggestion, setActiveSuggestion] = useState(0)
+  const [suggestionsDismissed, setSuggestionsDismissed] = useState(false)
   const sourceRef = useRef(createDatasetSource())
   const storeRef = useRef<DatasetStore | undefined>(undefined)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const queryInputRef = useRef<HTMLInputElement>(null)
+  const pendingCaretRef = useRef<number | null>(null)
 
   if (storeRef.current === undefined) {
     storeRef.current = createDatasetStore(window.localStorage)
@@ -142,9 +152,72 @@ export default function App() {
   )
 
   const suggestions = useMemo(
-    () => (records === null ? [] : suggestValues(records, queryText)),
-    [records, queryText],
+    () =>
+      records === null ? [] : suggestQuery(records, queryText, queryCaret),
+    [queryCaret, queryText, records],
   )
+
+  const menuOpen = suggestions.length > 0 && !suggestionsDismissed
+
+  const acceptSuggestion = useCallback(
+    (index: number) => {
+      const suggestion = suggestions[index]
+      if (suggestion === undefined) return
+      const next = `${queryText.slice(0, suggestion.replaceFrom)}${suggestion.value}${queryText.slice(suggestion.replaceTo)}`
+      pendingCaretRef.current = suggestion.replaceFrom + suggestion.value.length
+      setQueryText(next)
+      setQueryCaret(pendingCaretRef.current)
+      setSuggestionsDismissed(true)
+    },
+    [queryText, suggestions],
+  )
+
+  useEffect(() => {
+    setActiveSuggestion(0)
+  }, [suggestions])
+
+  useEffect(() => {
+    const caret = pendingCaretRef.current
+    if (caret === null) return
+    pendingCaretRef.current = null
+    queryInputRef.current?.setSelectionRange(caret, caret)
+  }, [queryText])
+
+  const handleQueryChange = (event: ReactChangeEvent<HTMLInputElement>) => {
+    setQueryText(event.target.value)
+    setQueryCaret(event.target.selectionStart ?? event.target.value.length)
+    setSuggestionsDismissed(false)
+  }
+
+  const handleQueryKeyDown = (
+    event: ReactKeyboardEvent<HTMLInputElement>,
+  ) => {
+    if (menuOpen) {
+      if (event.key === 'ArrowDown') {
+        event.preventDefault()
+        setActiveSuggestion((index) => (index + 1) % suggestions.length)
+        return
+      }
+      if (event.key === 'ArrowUp') {
+        event.preventDefault()
+        setActiveSuggestion(
+          (index) => (index - 1 + suggestions.length) % suggestions.length,
+        )
+        return
+      }
+      if (event.key === 'Enter' || event.key === 'Tab') {
+        event.preventDefault()
+        acceptSuggestion(activeSuggestion)
+        return
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSuggestionsDismissed(true)
+        return
+      }
+    }
+    if (event.key === 'Enter') applyQuery(queryText)
+  }
 
   const maxInputWidth = useCallback(
     () => Math.max(MIN_INPUT_WIDTH, window.innerWidth - MIN_TABLE_WIDTH),
@@ -346,22 +419,54 @@ export default function App() {
           <section className="panel table-panel">
             <div className="query-bar">
               <label htmlFor="query-input">Query DSL</label>
-              <input
-                id="query-input"
-                type="search"
-                list={SUGGESTIONS_ID}
-                value={queryText}
-                placeholder='e.g. address.city:london AND age:>40'
-                onChange={(event) => setQueryText(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter') applyQuery(queryText)
-                }}
-              />
-              <datalist id={SUGGESTIONS_ID}>
-                {suggestions.map((value) => (
-                  <option key={value} value={value} />
-                ))}
-              </datalist>
+              <div className="query-field">
+                <input
+                  ref={queryInputRef}
+                  id="query-input"
+                  type="search"
+                  role="combobox"
+                  autoComplete="off"
+                  aria-expanded={menuOpen}
+                  aria-controls={SUGGESTIONS_LIST_ID}
+                  aria-autocomplete="list"
+                  aria-activedescendant={
+                    menuOpen ? suggestionOptionId(activeSuggestion) : undefined
+                  }
+                  value={queryText}
+                  placeholder='e.g. address.city:london AND age:>40'
+                  onChange={handleQueryChange}
+                  onKeyDown={handleQueryKeyDown}
+                  onBlur={() => setSuggestionsDismissed(true)}
+                />
+                {menuOpen ? (
+                  <ul
+                    id={SUGGESTIONS_LIST_ID}
+                    className="suggestions"
+                    role="listbox"
+                    aria-label="Query suggestions"
+                  >
+                    {suggestions.map((suggestion, index) => (
+                      <li
+                        key={`${suggestion.kind}:${suggestion.value}`}
+                        id={suggestionOptionId(index)}
+                        role="option"
+                        aria-label={suggestion.value}
+                        aria-selected={index === activeSuggestion}
+                        onMouseDown={(event) => event.preventDefault()}
+                        onMouseEnter={() => setActiveSuggestion(index)}
+                        onClick={() => acceptSuggestion(index)}
+                      >
+                        <span className="suggestion-value">
+                          {suggestion.value}
+                        </span>
+                        <span className="suggestion-kind" aria-hidden="true">
+                          {suggestion.kind}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                ) : null}
+              </div>
               <a
                 className="docs-link"
                 href={LIQE_DOCS_URL}

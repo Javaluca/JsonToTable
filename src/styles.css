@@ -217,6 +217,13 @@ button:disabled {
   white-space: nowrap;
 }
 
+.query-field {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+}
+
 .query-bar input {
   flex: 1 1 auto;
   min-width: 0;
@@ -225,6 +232,46 @@ button:disabled {
   padding: 0.3rem 0.45rem;
   border: 1px solid #c3c9d0;
   border-radius: 6px;
+}
+
+.suggestions {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  right: 0;
+  z-index: 20;
+  margin: 0;
+  padding: 0.2rem 0;
+  list-style: none;
+  max-height: 16rem;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #d8dce1;
+  border-radius: 6px;
+  box-shadow: 0 6px 18px rgba(15, 20, 25, 0.12);
+}
+
+.suggestions li {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.2rem 0.5rem;
+  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
+  font-size: 0.78rem;
+  cursor: pointer;
+}
+
+.suggestions li[aria-selected='true'] {
+  background: #e8f0fe;
+}
+
+.suggestion-kind {
+  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: #8a929c;
 }
 
 .docs-link {

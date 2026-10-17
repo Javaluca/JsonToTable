@@ -17,10 +17,10 @@ vi.mock('./JsonEditor', () => ({
   ),
 }))
 
-function suggestedValues(): (string | null)[] {
-  return Array.from(
-    document.querySelectorAll('#query-suggestions option'),
-  ).map((option) => option.getAttribute('value'))
+function suggestionNames(): string[] {
+  return within(screen.getByRole('listbox'))
+    .getAllByRole('option')
+    .map((option) => option.getAttribute('aria-label') ?? '')
 }
 
 async function loadSampleDataset(): Promise<void> {
@@ -72,7 +72,9 @@ describe('App', () => {
 
     await loadSampleDataset()
 
-    await userEvent.type(screen.getByLabelText(/query dsl/i), 'name:grace')
+    const input = screen.getByLabelText(/query dsl/i)
+    await userEvent.type(input, 'name:grace')
+    await userEvent.keyboard('{Escape}')
 
     await new Promise((resolve) => setTimeout(resolve, 400))
 
@@ -83,12 +85,13 @@ describe('App', () => {
     expect(await screen.findByText('1 / 5')).toBeInTheDocument()
   })
 
-  it('keeps the last valid Result Set and shows an error for a bad query', async () => {
+  it('shows an error for an incomplete query once the suggester is dismissed', async () => {
     render(<App />)
 
     await loadSampleDataset()
 
     await userEvent.type(screen.getByLabelText(/query dsl/i), 'name:')
+    await userEvent.keyboard('{Escape}')
     await userEvent.keyboard('{Enter}')
 
     expect(await screen.findByRole('alert')).toHaveTextContent(
@@ -97,17 +100,70 @@ describe('App', () => {
     expect(screen.getByText('5 / 5')).toBeInTheDocument()
   })
 
-  it('suggests values while writing a clause', async () => {
+  it('suggests Field paths while writing a field name', async () => {
     render(<App />)
 
     await loadSampleDataset()
 
-    await userEvent.type(
-      screen.getByLabelText(/query dsl/i),
-      'address.city:lon',
+    await userEvent.type(screen.getByLabelText(/query dsl/i), 'add')
+
+    expect(suggestionNames()).toEqual([
+      'address.city',
+      'address.country',
+    ])
+  })
+
+  it('suggests values for the field being written and inserts the choice', async () => {
+    render(<App />)
+
+    await loadSampleDataset()
+
+    const input = screen.getByLabelText(/query dsl/i)
+    await userEvent.type(input, 'address.city:lon')
+
+    await userEvent.click(
+      within(screen.getByRole('listbox')).getByRole('option', {
+        name: 'London',
+      }),
     )
 
-    expect(suggestedValues()).toEqual(['London'])
+    expect(input).toHaveValue('address.city:London')
+    expect(screen.queryByRole('listbox')).not.toBeInTheDocument()
+    expect(screen.getByText('5 / 5')).toBeInTheDocument()
+  })
+
+  it('completes a value from the keyboard without running the query', async () => {
+    render(<App />)
+
+    await loadSampleDataset()
+
+    const input = screen.getByLabelText(/query dsl/i)
+    await userEvent.type(input, 'name:gr')
+
+    await userEvent.keyboard('{Enter}')
+
+    expect(input).toHaveValue('name:"Grace Hopper"')
+    expect(screen.getByText('5 / 5')).toBeInTheDocument()
+
+    await userEvent.keyboard('{Enter}')
+
+    expect(await screen.findByText('1 / 5')).toBeInTheDocument()
+  })
+
+  it('walks the suggestions with the arrow keys', async () => {
+    render(<App />)
+
+    await loadSampleDataset()
+
+    const input = screen.getByLabelText(/query dsl/i)
+    await userEvent.type(input, 'address.city:')
+
+    expect(suggestionNames().slice(0, 2)).toEqual(['London', '"New York"'])
+
+    await userEvent.keyboard('{ArrowDown}')
+    await userEvent.keyboard('{Enter}')
+
+    expect(input).toHaveValue('address.city:"New York"')
   })
 
   it('keeps several Datasets and switches between them from the picker', async () => {
