@@ -5,8 +5,12 @@ A single-page tool that loads a JSON Dataset and displays it in a queryable, vir
 ## Language
 
 **Dataset**:
-The ordered collection of Records loaded into the app, via paste or file upload.
+A JSON input loaded into the app, identified by its text and holding an ordered collection of Records. The app keeps several Datasets at once; exactly one is Active.
 _Avoid_: data, payload, input
+
+**Active Dataset**:
+The Dataset currently driving the table and the Query DSL; chosen from the Dataset picker.
+_Avoid_: current data, selected input
 
 **Record**:
 A single JSON object in the Dataset; rendered as one table row.

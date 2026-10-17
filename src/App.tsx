@@ -14,13 +14,10 @@ import {
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import { compileQuery } from './compile-query'
-import {
-  createDatasetHistory,
-  type DatasetHistory,
-  type HistoryEntry,
-} from './dataset-history'
+import { createDatasetStore, type DatasetStore } from './dataset-store'
 import { createDatasetSource } from './dataset-source'
 import { deriveColumns } from './derive-columns'
+import JsonEditor from './JsonEditor'
 import type { JsonRecord } from './parse-dataset'
 import { SAMPLE_DATASET } from './sample-data'
 import { suggestValues } from './suggest-values'
@@ -30,6 +27,7 @@ ModuleRegistry.registerModules([AllCommunityModule])
 
 const LIQE_DOCS_URL = 'https://github.com/gnavli/liqe'
 const SUGGESTIONS_ID = 'query-suggestions'
+const EDITOR_LABEL = 'Paste a JSON array or NDJSON'
 const DEFAULT_INPUT_WIDTH = 360
 const MIN_INPUT_WIDTH = 220
 const MIN_TABLE_WIDTH = 320
@@ -56,44 +54,69 @@ function clamp(value: number, min: number, max: number): number {
 export default function App() {
   const [view, setView] = useState<View>('both')
   const [inputWidth, setInputWidth] = useState(DEFAULT_INPUT_WIDTH)
-  const [pastedText, setPastedText] = useState('')
+  const [editorText, setEditorText] = useState('')
   const [records, setRecords] = useState<JsonRecord[] | null>(null)
   const [matched, setMatched] = useState<JsonRecord[]>([])
   const [isParsing, setIsParsing] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
   const [queryText, setQueryText] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
-  const [recent, setRecent] = useState<readonly HistoryEntry[]>([])
   const sourceRef = useRef(createDatasetSource())
-  const historyRef = useRef<DatasetHistory | undefined>(undefined)
+  const storeRef = useRef<DatasetStore | undefined>(undefined)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
-  if (historyRef.current === undefined) {
-    historyRef.current = createDatasetHistory(window.localStorage)
+  if (storeRef.current === undefined) {
+    storeRef.current = createDatasetStore(window.localStorage)
   }
-  const history = historyRef.current
+  const store = storeRef.current
 
-  useEffect(() => {
-    setRecent(history.list())
-  }, [history])
+  const [datasets, setDatasets] = useState(() => store.list())
+  const [activeId, setActiveId] = useState<string | null>(null)
 
-  const loadDataset = useCallback(
-    (text: string) => {
+  const parseInto = useCallback(
+    async (text: string): Promise<JsonRecord[] | null> => {
       setIsParsing(true)
       setLoadError(null)
-      void sourceRef.current.parse(text).then((result) => {
-        setIsParsing(false)
-        if (result.ok) {
-          setRecords(result.records)
-          setMatched(result.records)
-          setRecent(history.save(text, result.records.length))
-        } else {
-          setLoadError(result.error)
-        }
-      })
+      const result = await sourceRef.current.parse(text)
+      setIsParsing(false)
+      if (!result.ok) {
+        setLoadError(result.error)
+        return null
+      }
+      setRecords(result.records)
+      setMatched(result.records)
+      return result.records
     },
-    [history],
+    [],
   )
+
+  const addDataset = useCallback(
+    async (text: string) => {
+      const parsed = await parseInto(text)
+      if (parsed === null) return
+      const entries = store.add(text, parsed.length)
+      setDatasets(entries)
+      setActiveId(entries[0].id)
+    },
+    [parseInto, store],
+  )
+
+  const activateDataset = useCallback(
+    async (id: string) => {
+      const entry = datasets.find((candidate) => candidate.id === id)
+      if (entry === undefined) return
+      setEditorText(entry.text)
+      const parsed = await parseInto(entry.text)
+      if (parsed !== null) setActiveId(id)
+    },
+    [datasets, parseInto],
+  )
+
+  useEffect(() => {
+    const [mostRecent] = store.list()
+    if (mostRecent !== undefined) void activateDataset(mostRecent.id)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const cancelParsing = useCallback(() => {
     sourceRef.current.cancel()
@@ -184,13 +207,15 @@ export default function App() {
     [],
   )
 
+  const hasDatasets = records !== null
+  const activeView: View = hasDatasets ? view : 'input'
   const counterLabel =
     records === null
       ? 'No Dataset loaded'
       : `Matching ${matched.length} of ${records.length} Records`
 
-  const showInput = view !== 'table'
-  const showTable = view !== 'input'
+  const showInput = activeView !== 'table'
+  const showTable = activeView !== 'input'
 
   return (
     <main className="app">
@@ -201,13 +226,31 @@ export default function App() {
             <button
               key={option.id}
               type="button"
-              aria-pressed={view === option.id}
+              aria-pressed={activeView === option.id}
+              disabled={!hasDatasets}
               onClick={() => setView(option.id)}
             >
               {option.label}
             </button>
           ))}
         </div>
+        <select
+          className="dataset-picker"
+          aria-label="Active Dataset"
+          value={activeId ?? ''}
+          disabled={datasets.length === 0}
+          onChange={(event) => void activateDataset(event.target.value)}
+        >
+          {datasets.length === 0 ? (
+            <option value="">No Datasets</option>
+          ) : (
+            datasets.map((entry) => (
+              <option key={entry.id} value={entry.id}>
+                {entry.label}
+              </option>
+            ))
+          )}
+        </select>
         <p className="topbar-status" aria-label={counterLabel}>
           {records === null
             ? 'No Dataset loaded'
@@ -219,21 +262,24 @@ export default function App() {
         {showInput ? (
           <section
             className="panel input-panel"
-            style={view === 'both' ? { flex: `0 0 ${inputWidth}px` } : undefined}
+            style={
+              activeView === 'both' ? { flex: `0 0 ${inputWidth}px` } : undefined
+            }
           >
-            <label htmlFor="dataset-input">Paste a JSON array or NDJSON</label>
-            <textarea
-              id="dataset-input"
-              value={pastedText}
-              onChange={(event) => setPastedText(event.target.value)}
-              placeholder='[{"id": 1, "name": "Ada"}]'
-            />
+            <p className="panel-title">{EDITOR_LABEL}</p>
+            <div className="editor">
+              <JsonEditor
+                ariaLabel={EDITOR_LABEL}
+                value={editorText}
+                onChange={setEditorText}
+              />
+            </div>
             <div className="controls">
               <button
                 type="button"
                 className="primary"
-                disabled={isParsing || pastedText.trim() === ''}
-                onClick={() => loadDataset(pastedText)}
+                disabled={isParsing || editorText.trim() === ''}
+                onClick={() => void addDataset(editorText)}
               >
                 Load JSON
               </button>
@@ -247,8 +293,8 @@ export default function App() {
                     const file = event.target.files?.[0]
                     if (file) {
                       void file.text().then((text) => {
-                        setPastedText('')
-                        loadDataset(text)
+                        setEditorText(text)
+                        void addDataset(text)
                       })
                     }
                   }}
@@ -258,8 +304,8 @@ export default function App() {
                 type="button"
                 onClick={() => {
                   const text = JSON.stringify(SAMPLE_DATASET, null, 2)
-                  setPastedText(text)
-                  loadDataset(text)
+                  setEditorText(text)
+                  void addDataset(text)
                 }}
               >
                 Load sample data
@@ -276,30 +322,10 @@ export default function App() {
                 {loadError}
               </p>
             ) : null}
-            {recent.length > 0 ? (
-              <div className="recent">
-                <p className="recent-title">Recent Datasets</p>
-                <ul>
-                  {recent.map((entry) => (
-                    <li key={entry.id}>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setPastedText(entry.text)
-                          loadDataset(entry.text)
-                        }}
-                      >
-                        {entry.label}
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
           </section>
         ) : null}
 
-        {view === 'both' ? (
+        {activeView === 'both' ? (
           <div
             className="separator"
             role="separator"
@@ -353,8 +379,8 @@ export default function App() {
             <p className="hint">Press Enter to run the query.</p>
             {records === null ? (
               <p className="empty">
-                Load a Dataset to start querying — paste JSON, upload a file, or
-                use the sample data.
+                No Dataset loaded yet — paste JSON, upload a file, or use the
+                sample data.
               </p>
             ) : (
               <div className="grid">

@@ -31,9 +31,8 @@ body {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.35rem 0.6rem;
+  padding: 0.4rem 0.7rem;
   background: #fff;
-  border-bottom: 1px solid #d8dce1;
   flex: 0 0 auto;
 }
 
@@ -43,8 +42,20 @@ body {
   white-space: nowrap;
 }
 
+.dataset-picker {
+  margin-left: auto;
+  max-width: 24rem;
+  font: inherit;
+  font-size: 0.78rem;
+  padding: 0.24rem 0.4rem;
+  border: 1px solid #c3c9d0;
+  border-radius: 6px;
+  background: #fff;
+  color: #1b1f24;
+}
+
 .topbar-status {
-  margin: 0 0 0 auto;
+  margin: 0;
   font-size: 0.78rem;
   font-variant-numeric: tabular-nums;
   color: #3c4450;
@@ -88,7 +99,6 @@ body {
   flex-direction: column;
   min-height: 0;
   background: #fff;
-  border: 1px solid #d8dce1;
   border-radius: 8px;
   padding: 0.6rem;
 }
@@ -99,9 +109,21 @@ body {
   gap: 0.5rem;
 }
 
-.input-panel textarea {
+.panel-title {
+  margin: 0;
+  font-weight: 600;
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #5b6470;
+}
+
+.editor {
   flex: 1 1 auto;
-  min-height: 6rem;
+  min-height: 8rem;
+  overflow: hidden;
+  border-radius: 6px;
+  border: 1px solid #e4e7ea;
 }
 
 .separator {
@@ -131,16 +153,6 @@ label {
   text-transform: uppercase;
   letter-spacing: 0.03em;
   color: #5b6470;
-}
-
-textarea {
-  width: 100%;
-  font-family: ui-monospace, 'Cascadia Code', Consolas, monospace;
-  font-size: 0.78rem;
-  padding: 0.4rem;
-  border: 1px solid #c3c9d0;
-  border-radius: 6px;
-  resize: none;
 }
 
 .controls {
@@ -233,53 +245,15 @@ button:disabled {
   margin: 0;
 }
 
-.recent {
-  flex: 0 0 auto;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  min-height: 0;
-  border-top: 1px solid #e4e7ea;
-  padding-top: 0.45rem;
-}
-
-.recent-title {
-  margin: 0;
-  font-size: 0.72rem;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.03em;
-  color: #5b6470;
-}
-
-.recent ul {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  max-height: 9rem;
-  overflow-y: auto;
-}
-
-.recent button {
-  width: 100%;
-  text-align: left;
-  font-size: 0.75rem;
-  padding: 0.25rem 0.45rem;
-  background: #fafbfc;
-}
-
 .grid {
   flex: 1 1 auto;
   min-height: 0;
   width: 100%;
-  border: 1px solid #d8dce1;
-  border-radius: 6px;
   overflow: hidden;
+  border-radius: 6px;
   --ag-font-size: 12px;
   --ag-grid-size: 4px;
+  --ag-borders: none;
 }
 
 .empty {
@@ -292,6 +266,4 @@ button:disabled {
   text-align: center;
   color: #5b6470;
   font-size: 0.82rem;
-  border: 1px dashed #c3c9d0;
-  border-radius: 6px;
 }
