@@ -1,0 +1,3 @@
+# AG Grid Community for the table
+
+We use AG Grid Community (free) rather than Enterprise (row grouping / pivoting; requires a paid license and shows a watermark) or TanStack Table: the requirements — virtualization for 100k+ Records, native sorting, native column filters, dot-path field access — are all covered by Community. The grid API is pervasive across the app (columns are derived from Dataset Field paths, filters compose with the Query DSL), so swapping grids later would be a costly rewrite; hence this decision is recorded. Composition rule: the Query DSL produces the Result Set; AG Grid's native column filters then intersect it for display, and both surfaces stay live.
