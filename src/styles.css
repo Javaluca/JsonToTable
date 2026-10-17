@@ -43,10 +43,11 @@ body {
   white-space: nowrap;
 }
 
-.topbar-meta {
+.topbar-status {
   margin: 0 0 0 auto;
-  font-size: 0.75rem;
-  color: #5b6470;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  color: #3c4450;
   white-space: nowrap;
 }
 
@@ -226,18 +227,48 @@ button:disabled {
   margin: 0;
 }
 
-.status {
-  font-size: 0.78rem;
-  margin: 0;
-  font-variant-numeric: tabular-nums;
-  flex: 0 0 auto;
-  color: #3c4450;
-}
-
 .error {
   font-size: 0.78rem;
   color: #b3261e;
   margin: 0;
+}
+
+.recent {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  min-height: 0;
+  border-top: 1px solid #e4e7ea;
+  padding-top: 0.45rem;
+}
+
+.recent-title {
+  margin: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: #5b6470;
+}
+
+.recent ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+.recent button {
+  width: 100%;
+  text-align: left;
+  font-size: 0.75rem;
+  padding: 0.25rem 0.45rem;
+  background: #fafbfc;
 }
 
 .grid {
@@ -247,6 +278,8 @@ button:disabled {
   border: 1px solid #d8dce1;
   border-radius: 6px;
   overflow: hidden;
+  --ag-font-size: 12px;
+  --ag-grid-size: 4px;
 }
 
 .empty {

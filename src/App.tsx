@@ -14,16 +14,22 @@ import {
 } from 'ag-grid-community'
 import { AgGridReact } from 'ag-grid-react'
 import { compileQuery } from './compile-query'
+import {
+  createDatasetHistory,
+  type DatasetHistory,
+  type HistoryEntry,
+} from './dataset-history'
 import { createDatasetSource } from './dataset-source'
 import { deriveColumns } from './derive-columns'
 import type { JsonRecord } from './parse-dataset'
 import { SAMPLE_DATASET } from './sample-data'
+import { suggestValues } from './suggest-values'
 import './styles.css'
 
 ModuleRegistry.registerModules([AllCommunityModule])
 
 const LIQE_DOCS_URL = 'https://github.com/gnavli/liqe'
-const QUERY_DEBOUNCE_MS = 200
+const SUGGESTIONS_ID = 'query-suggestions'
 const DEFAULT_INPUT_WIDTH = 360
 const MIN_INPUT_WIDTH = 220
 const MIN_TABLE_WIDTH = 320
@@ -57,27 +63,37 @@ export default function App() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [queryText, setQueryText] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
+  const [recent, setRecent] = useState<readonly HistoryEntry[]>([])
   const sourceRef = useRef(createDatasetSource())
+  const historyRef = useRef<DatasetHistory | undefined>(undefined)
   const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
-  const maxInputWidth = useCallback(
-    () => Math.max(MIN_INPUT_WIDTH, window.innerWidth - MIN_TABLE_WIDTH),
-    [],
-  )
+  if (historyRef.current === undefined) {
+    historyRef.current = createDatasetHistory(window.localStorage)
+  }
+  const history = historyRef.current
 
-  const loadDataset = useCallback((text: string) => {
-    setIsParsing(true)
-    setLoadError(null)
-    void sourceRef.current.parse(text).then((result) => {
-      setIsParsing(false)
-      if (result.ok) {
-        setRecords(result.records)
-        setMatched(result.records)
-      } else {
-        setLoadError(result.error)
-      }
-    })
-  }, [])
+  useEffect(() => {
+    setRecent(history.list())
+  }, [history])
+
+  const loadDataset = useCallback(
+    (text: string) => {
+      setIsParsing(true)
+      setLoadError(null)
+      void sourceRef.current.parse(text).then((result) => {
+        setIsParsing(false)
+        if (result.ok) {
+          setRecords(result.records)
+          setMatched(result.records)
+          setRecent(history.save(text, result.records.length))
+        } else {
+          setLoadError(result.error)
+        }
+      })
+    },
+    [history],
+  )
 
   const cancelParsing = useCallback(() => {
     sourceRef.current.cancel()
@@ -88,19 +104,29 @@ export default function App() {
     return () => sourceRef.current.cancel()
   }, [])
 
-  useEffect(() => {
-    if (records === null) return
-    const handle = window.setTimeout(() => {
-      const compiled = compileQuery(queryText)
+  const applyQuery = useCallback(
+    (text: string) => {
+      if (records === null) return
+      const compiled = compileQuery(text)
       if (compiled.ok) {
         setQueryError(null)
         setMatched(records.filter((record) => compiled.test(record)))
       } else {
         setQueryError(compiled.error)
       }
-    }, QUERY_DEBOUNCE_MS)
-    return () => window.clearTimeout(handle)
-  }, [queryText, records])
+    },
+    [records],
+  )
+
+  const suggestions = useMemo(
+    () => (records === null ? [] : suggestValues(records, queryText)),
+    [records, queryText],
+  )
+
+  const maxInputWidth = useCallback(
+    () => Math.max(MIN_INPUT_WIDTH, window.innerWidth - MIN_TABLE_WIDTH),
+    [],
+  )
 
   const handleSeparatorPointerDown = (
     event: ReactPointerEvent<HTMLDivElement>,
@@ -123,7 +149,9 @@ export default function App() {
     )
   }
 
-  const handleSeparatorPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleSeparatorPointerUp = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
     dragRef.current = null
     event.currentTarget.releasePointerCapture?.(event.pointerId)
   }
@@ -156,6 +184,11 @@ export default function App() {
     [],
   )
 
+  const counterLabel =
+    records === null
+      ? 'No Dataset loaded'
+      : `Matching ${matched.length} of ${records.length} Records`
+
   const showInput = view !== 'table'
   const showTable = view !== 'input'
 
@@ -175,10 +208,10 @@ export default function App() {
             </button>
           ))}
         </div>
-        <p className="topbar-meta">
+        <p className="topbar-status" aria-label={counterLabel}>
           {records === null
             ? 'No Dataset loaded'
-            : `${records.length} Records in Dataset`}
+            : `${matched.length} / ${records.length}`}
         </p>
       </header>
 
@@ -243,6 +276,26 @@ export default function App() {
                 {loadError}
               </p>
             ) : null}
+            {recent.length > 0 ? (
+              <div className="recent">
+                <p className="recent-title">Recent Datasets</p>
+                <ul>
+                  {recent.map((entry) => (
+                    <li key={entry.id}>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPastedText(entry.text)
+                          loadDataset(entry.text)
+                        }}
+                      >
+                        {entry.label}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
@@ -270,10 +323,19 @@ export default function App() {
               <input
                 id="query-input"
                 type="search"
+                list={SUGGESTIONS_ID}
                 value={queryText}
                 placeholder='e.g. address.city:london AND age:>40'
                 onChange={(event) => setQueryText(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') applyQuery(queryText)
+                }}
               />
+              <datalist id={SUGGESTIONS_ID}>
+                {suggestions.map((value) => (
+                  <option key={value} value={value} />
+                ))}
+              </datalist>
               <a
                 className="docs-link"
                 href={LIQE_DOCS_URL}
@@ -288,27 +350,22 @@ export default function App() {
                 {queryError}
               </p>
             ) : null}
+            <p className="hint">Press Enter to run the query.</p>
             {records === null ? (
               <p className="empty">
                 Load a Dataset to start querying — paste JSON, upload a file, or
                 use the sample data.
               </p>
             ) : (
-              <>
-                <p
-                  className="status"
-                  aria-label={`Matching ${matched.length} of ${records.length} Records`}
-                >
-                  {`${matched.length} / ${records.length}`}
-                </p>
-                <div className="grid">
-                  <AgGridReact
-                    rowData={matched}
-                    columnDefs={columnDefs}
-                    defaultColDef={defaultColDef}
-                  />
-                </div>
-              </>
+              <div className="grid">
+                <AgGridReact
+                  rowData={matched}
+                  columnDefs={columnDefs}
+                  defaultColDef={defaultColDef}
+                  rowHeight={24}
+                  headerHeight={28}
+                />
+              </div>
             )}
           </section>
         ) : null}
