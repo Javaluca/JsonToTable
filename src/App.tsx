@@ -1,4 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import {
   AllCommunityModule,
   ModuleRegistry,
@@ -16,6 +24,10 @@ ModuleRegistry.registerModules([AllCommunityModule])
 
 const LIQE_DOCS_URL = 'https://github.com/gnavli/liqe'
 const QUERY_DEBOUNCE_MS = 200
+const DEFAULT_INPUT_WIDTH = 360
+const MIN_INPUT_WIDTH = 220
+const MIN_TABLE_WIDTH = 320
+const KEYBOARD_RESIZE_STEP = 16
 
 type View = 'input' | 'table' | 'both'
 
@@ -31,8 +43,13 @@ function formatCellValue(value: unknown): string {
   return String(value)
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(Math.max(value, min), max)
+}
+
 export default function App() {
   const [view, setView] = useState<View>('both')
+  const [inputWidth, setInputWidth] = useState(DEFAULT_INPUT_WIDTH)
   const [pastedText, setPastedText] = useState('')
   const [records, setRecords] = useState<JsonRecord[] | null>(null)
   const [matched, setMatched] = useState<JsonRecord[]>([])
@@ -41,6 +58,12 @@ export default function App() {
   const [queryText, setQueryText] = useState('')
   const [queryError, setQueryError] = useState<string | null>(null)
   const sourceRef = useRef(createDatasetSource())
+  const dragRef = useRef<{ startX: number; startWidth: number } | null>(null)
+
+  const maxInputWidth = useCallback(
+    () => Math.max(MIN_INPUT_WIDTH, window.innerWidth - MIN_TABLE_WIDTH),
+    [],
+  )
 
   const loadDataset = useCallback((text: string) => {
     setIsParsing(true)
@@ -78,6 +101,44 @@ export default function App() {
     }, QUERY_DEBOUNCE_MS)
     return () => window.clearTimeout(handle)
   }, [queryText, records])
+
+  const handleSeparatorPointerDown = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    dragRef.current = { startX: event.clientX, startWidth: inputWidth }
+    event.currentTarget.setPointerCapture?.(event.pointerId)
+  }
+
+  const handleSeparatorPointerMove = (
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    const drag = dragRef.current
+    if (drag === null) return
+    setInputWidth(
+      clamp(
+        drag.startWidth + event.clientX - drag.startX,
+        MIN_INPUT_WIDTH,
+        maxInputWidth(),
+      ),
+    )
+  }
+
+  const handleSeparatorPointerUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    dragRef.current = null
+    event.currentTarget.releasePointerCapture?.(event.pointerId)
+  }
+
+  const handleSeparatorKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ) => {
+    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+    event.preventDefault()
+    const step =
+      event.key === 'ArrowRight' ? KEYBOARD_RESIZE_STEP : -KEYBOARD_RESIZE_STEP
+    setInputWidth((width) =>
+      clamp(width + step, MIN_INPUT_WIDTH, maxInputWidth()),
+    )
+  }
 
   const columnDefs = useMemo<ColDef[]>(
     () => (records === null ? [] : deriveColumns(records)),
@@ -123,7 +184,10 @@ export default function App() {
 
       <div className="workspace">
         {showInput ? (
-          <section className="panel input-panel">
+          <section
+            className="panel input-panel"
+            style={view === 'both' ? { flex: `0 0 ${inputWidth}px` } : undefined}
+          >
             <label htmlFor="dataset-input">Paste a JSON array or NDJSON</label>
             <textarea
               id="dataset-input"
@@ -182,6 +246,23 @@ export default function App() {
           </section>
         ) : null}
 
+        {view === 'both' ? (
+          <div
+            className="separator"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize input panel"
+            aria-valuenow={inputWidth}
+            aria-valuemin={MIN_INPUT_WIDTH}
+            aria-valuemax={maxInputWidth()}
+            tabIndex={0}
+            onPointerDown={handleSeparatorPointerDown}
+            onPointerMove={handleSeparatorPointerMove}
+            onPointerUp={handleSeparatorPointerUp}
+            onKeyDown={handleSeparatorKeyDown}
+          />
+        ) : null}
+
         {showTable ? (
           <section className="panel table-panel">
             <div className="query-bar">
@@ -214,8 +295,11 @@ export default function App() {
               </p>
             ) : (
               <>
-                <p className="status">
-                  {`Matching ${matched.length} of ${records.length} Records`}
+                <p
+                  className="status"
+                  aria-label={`Matching ${matched.length} of ${records.length} Records`}
+                >
+                  {`${matched.length} / ${records.length}`}
                 </p>
                 <div className="grid">
                   <AgGridReact

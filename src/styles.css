@@ -93,14 +93,29 @@ body {
 }
 
 .input-panel {
-  flex: 0 0 360px;
-  min-width: 280px;
+  flex: 1 1 auto;
+  min-width: 0;
   gap: 0.5rem;
 }
 
 .input-panel textarea {
   flex: 1 1 auto;
   min-height: 6rem;
+}
+
+.separator {
+  flex: 0 0 6px;
+  align-self: stretch;
+  border-radius: 3px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.separator:hover,
+.separator:focus-visible {
+  background: #b9c0c8;
+  outline: none;
 }
 
 .table-panel {
