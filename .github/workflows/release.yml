@@ -3,6 +3,8 @@ name: Release
 
 on:
   push:
+    branches:
+      - master
     tags:
       - 'v*'
   workflow_dispatch:
@@ -51,8 +53,8 @@ jobs:
   deploy:
     name: Deploy to GitHub Pages
     needs: build
-    # The github-pages environment only admits the default branch, and a tag
-    # always points at a commit master has already published.
+    # The github-pages environment only admits the default branch, so a tag
+    # run cuts the Release without re-deploying what master already published.
     if: github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     permissions:
