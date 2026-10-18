@@ -21,7 +21,7 @@ vi.mock('./JsonEditor', () => ({
 vi.mock('ag-grid-react', () => ({
   AgGridReact: (props: {
     rowData?: JsonRecord[]
-    onRowClicked?: (event: { data: JsonRecord }) => void
+    onCellClicked?: (event: { data: JsonRecord; colDef: { field?: string } }) => void
     onRowDoubleClicked?: (event: { data: JsonRecord }) => void
   }) => (
     <div data-testid="grid">
@@ -29,7 +29,9 @@ vi.mock('ag-grid-react', () => ({
         <div
           key={index}
           data-testid={`row-${index}`}
-          onClick={() => props.onRowClicked?.({ data: row })}
+          onClick={() =>
+            props.onCellClicked?.({ data: row, colDef: { field: 'name' } })
+          }
           onDoubleClick={() => props.onRowDoubleClicked?.({ data: row })}
         >
           {JSON.stringify(row)}

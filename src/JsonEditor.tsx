@@ -1,8 +1,9 @@
-import Editor, { loader } from '@monaco-editor/react'
+import Editor, { loader, type OnMount } from '@monaco-editor/react'
 import * as monaco from 'monaco-editor/editor/editor.api'
 import 'monaco-editor/language/json/monaco.contribution'
 import EditorWorker from 'monaco-editor/editor/editor.worker?worker'
 import JsonWorker from 'monaco-editor/language/json/json.worker?worker'
+import { useEffect, useRef } from 'react'
 import { FONT_MONO } from './theme'
 
 loader.config({ monaco })
@@ -61,11 +62,15 @@ monaco.editor.defineTheme('json-query-dark', {
   },
 })
 
+export type SourceRange = { start: number; end: number }
+
 type JsonEditorProps = {
   ariaLabel: string
   value: string
   onChange: (value: string) => void
   theme: 'light' | 'dark'
+  onSubmit?: () => void
+  reveal?: SourceRange | null
 }
 
 export default function JsonEditor({
@@ -73,13 +78,45 @@ export default function JsonEditor({
   value,
   onChange,
   theme,
+  onSubmit,
+  reveal,
 }: JsonEditorProps) {
+  const submitRef = useRef(onSubmit)
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+
+  useEffect(() => {
+    submitRef.current = onSubmit
+  }, [onSubmit])
+
+  const handleMount: OnMount = (editor, instance) => {
+    editorRef.current = editor
+    editor.addCommand(instance.KeyMod.CtrlCmd | instance.KeyCode.Enter, () => {
+      submitRef.current?.()
+    })
+  }
+
+  useEffect(() => {
+    const editor = editorRef.current
+    if (editor === null || reveal == null) return
+    const model = editor.getModel()
+    if (model === null) return
+    const from = model.getPositionAt(reveal.start)
+    const to = model.getPositionAt(reveal.end)
+    editor.setSelection(
+      new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+    )
+    editor.revealRangeInCenterIfOutsideViewport(
+      new monaco.Range(from.lineNumber, from.column, to.lineNumber, to.column),
+    )
+  }, [reveal])
+
   return (
     <Editor
       value={value}
       language="json"
       theme={theme === 'dark' ? 'json-query-dark' : 'json-query-light'}
       onChange={(next) => onChange(next ?? '')}
+      onMount={handleMount}
       options={{
         ariaLabel,
         minimap: { enabled: false },

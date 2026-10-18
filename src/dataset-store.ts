@@ -11,6 +11,7 @@ export type DatasetStore = {
   list: () => DatasetEntry[]
   add: (text: string, recordCount: number, name?: string) => DatasetEntry[]
   update: (id: string, text: string, recordCount: number) => DatasetEntry[]
+  rename: (id: string, name: string) => DatasetEntry[]
   remove: (id: string) => DatasetEntry[]
   clear: () => void
 }
@@ -70,6 +71,21 @@ export function createDatasetStore(
               text,
               recordCount,
               label: labelFor(text, recordCount, entry.name),
+            }
+          : entry,
+      )
+      write(entries)
+      return entries
+    },
+
+    rename(id, name) {
+      const custom = name.trim() || undefined
+      const entries = read().map((entry) =>
+        entry.id === id
+          ? {
+              ...entry,
+              name: custom,
+              label: labelFor(entry.text, entry.recordCount, custom),
             }
           : entry,
       )

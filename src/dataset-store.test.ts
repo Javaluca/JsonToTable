@@ -120,6 +120,41 @@ describe('createDatasetStore', () => {
     expect(entries[0].text).toBe('[{"id":1},{"id":2}]')
   })
 
+  it('renames a Dataset in place, keeping its id and text', () => {
+    const store = createDatasetStore(createStorageStub())
+    const created = store.add('[{"id":1},{"id":2}]', 2)
+
+    const entries = store.rename(created[0].id, 'People')
+
+    expect(entries).toHaveLength(1)
+    expect(entries[0].id).toBe(created[0].id)
+    expect(entries[0].savedAt).toBe(created[0].savedAt)
+    expect(entries[0].text).toBe(created[0].text)
+    expect(entries[0].name).toBe('People')
+    expect(entries[0].label).toBe('People · 2 Records')
+  })
+
+  it('reverts to the derived label when renamed to blank', () => {
+    const store = createDatasetStore(createStorageStub())
+    const created = store.add('[{"id":1,"name":"Ada"}]', 1, 'People')
+
+    const entries = store.rename(created[0].id, '   ')
+
+    expect(entries[0].name).toBeUndefined()
+    expect(entries[0].label).toBe('1 Record · Ada')
+  })
+
+  it('leaves other Datasets untouched when renaming', () => {
+    const store = createDatasetStore(createStorageStub())
+    store.add('[{"id":1}]', 1)
+    const created = store.add('[{"id":2}]', 2)
+
+    const entries = store.rename(created[0].id, 'Second')
+
+    expect(entries[1].name).toBeUndefined()
+    expect(entries[1].label).toContain('1 Record')
+  })
+
   it('removes a Dataset by id', () => {
     const store = createDatasetStore(createStorageStub())
     store.add('[{"id":1}]', 1)

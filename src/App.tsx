@@ -25,10 +25,12 @@ import { deriveColumns } from './derive-columns'
 import FieldsMenu from './FieldsMenu'
 import { copyText, downloadText } from './files'
 import { InputIcon, InspectorIcon, TableIcon } from './Icons'
-import JsonEditor from './JsonEditor'
+import JsonEditor, { type SourceRange } from './JsonEditor'
 import Landing from './Landing'
+import LoadBar from './LoadBar'
 import type { JsonRecord } from './parse-dataset'
 import { refineQuery } from './query-clause'
+import { fieldRange, recordRange } from './record-offset'
 import RecordPanel from './RecordPanel'
 import ResizeHandle from './ResizeHandle'
 import { SAMPLE_DATASET } from './sample-data'
@@ -91,7 +93,13 @@ export default function App() {
   const [inputWidth, setInputWidth] = useState(340)
   const [inspectorWidth, setInspectorWidth] = useState(320)
   const [sourceText, setSourceText] = useState('')
+  const [sourceDirty, setSourceDirty] = useState(false)
   const [sourceError, setSourceError] = useState<string | null>(null)
+  const [loadProgress, setLoadProgress] = useState<{
+    value: number | null
+    label: string
+  } | null>(null)
+  const [reveal, setReveal] = useState<SourceRange | null>(null)
   const [meterReady, setMeterReady] = useState(false)
   const [copiedResult, setCopiedResult] = useState(false)
   const isDark = useIsDark()
@@ -141,8 +149,10 @@ export default function App() {
     async (text: string): Promise<JsonRecord[] | null> => {
       setIsParsing(true)
       setLoadError(null)
-      const result = await sourceRef.current.parse(text)
+      setLoadProgress({ value: null, label: 'Parsing JSON' })
+      const result = await sourceRef.current.parse(text, setLoadProgress)
       setIsParsing(false)
+      setLoadProgress(null)
       if (!result.ok) {
         setLoadError(result.error)
         return null
@@ -161,8 +171,10 @@ export default function App() {
       setEditorText(entry.text)
       setSourceText(entry.text)
       setSourceError(null)
+      setReveal(null)
       const parsed = await parseInto(entry.text)
       if (parsed === null) return
+      setSourceDirty(false)
       setActiveId(id)
       setSelectedRecord(null)
       const remembered = queryMemoryRef.current.get(id) ?? ''
@@ -180,7 +192,9 @@ export default function App() {
       setDatasets(entries)
       setActiveId(entries[0].id)
       setSourceText(text)
+      setSourceDirty(false)
       setSourceError(null)
+      setReveal(null)
       setSelectedRecord(null)
       setQueryText('')
       setQueryError(null)
@@ -235,17 +249,22 @@ export default function App() {
 
   const applySource = useCallback(async () => {
     if (activeId === null) return
+    const text = sourceText
     setIsParsing(true)
-    const result = await sourceRef.current.parse(sourceText)
+    setLoadProgress({ value: null, label: 'Parsing JSON' })
+    const result = await sourceRef.current.parse(text, setLoadProgress)
     setIsParsing(false)
+    setLoadProgress(null)
     if (!result.ok) {
       setSourceError(result.error)
       return
     }
     setSourceError(null)
     setRecords(result.records)
+    setSourceDirty(false)
+    setReveal(null)
     setSelectedRecord(null)
-    const entries = store.update(activeId, sourceText, result.records.length)
+    const entries = store.update(activeId, text, result.records.length)
     setDatasets(entries)
     runQuery(result.records, queryText)
   }, [activeId, queryText, runQuery, sourceText, store])
@@ -258,14 +277,45 @@ export default function App() {
     setInspectorWidth((width) => Math.min(640, Math.max(220, width - delta)))
   }, [])
 
-  const selectRecord = useCallback((record: JsonRecord) => {
-    setSelectedRecord(record)
-  }, [])
+  const revealRecord = useCallback(
+    (record: JsonRecord, field?: string) => {
+      const index = records === null ? -1 : records.indexOf(record)
+      if (index === -1 || !inputOpen) {
+        setReveal(null)
+        return
+      }
+      const range = recordRange(sourceText, index)
+      if (range === null) {
+        setReveal(null)
+        return
+      }
+      if (field === undefined) {
+        setReveal(range)
+        return
+      }
+      const parts = field.split('.')
+      const key = parts[parts.length - 1]
+      setReveal(fieldRange(sourceText, range, key) ?? range)
+    },
+    [inputOpen, records, sourceText],
+  )
 
-  const inspectRecord = useCallback((record: JsonRecord) => {
-    setSelectedRecord(record)
-    setInspectorOpen(true)
-  }, [])
+  const selectRecord = useCallback(
+    (record: JsonRecord, field?: string) => {
+      setSelectedRecord(record)
+      revealRecord(record, field)
+    },
+    [revealRecord],
+  )
+
+  const inspectRecord = useCallback(
+    (record: JsonRecord) => {
+      setSelectedRecord(record)
+      revealRecord(record)
+      setInspectorOpen(true)
+    },
+    [revealRecord],
+  )
 
   const views = { input: inputOpen, table: tableOpen, inspector: inspectorOpen }
   const visibleViews =
@@ -278,6 +328,13 @@ export default function App() {
     else if (view === 'table') setTableOpen((open) => !open)
     else setInspectorOpen((open) => !open)
   }
+
+  const renameDataset = useCallback(
+    (id: string, name: string) => {
+      setDatasets(store.rename(id, name))
+    },
+    [store],
+  )
 
   const removeDataset = useCallback(
     (id: string) => {
@@ -301,7 +358,10 @@ export default function App() {
       setEditorOpen(false)
       setLoadError(null)
       setSourceText('')
+      setSourceDirty(false)
       setSourceError(null)
+      setLoadProgress(null)
+      setReveal(null)
     },
     [activeId, activateDataset, store],
   )
@@ -496,6 +556,7 @@ export default function App() {
                 showSample={!sampleInStore}
                 colorOf={colorOf}
                 onSelect={(id) => void activateDataset(id)}
+                onRename={renameDataset}
                 onRemove={removeDataset}
                 onLoadSample={loadSample}
               />
@@ -642,27 +703,39 @@ export default function App() {
                 >
                   <header className="panel-head">
                     <span>Input</span>
-                    <button
-                      type="button"
-                      className="control control-primary control-sm"
-                      disabled={isParsing}
-                      onClick={() => void applySource()}
-                    >
-                      {isParsing ? 'Parsing…' : 'Apply'}
-                    </button>
                   </header>
                   <div className="panel-body">
                     <JsonEditor
                       ariaLabel="Dataset source"
                       value={sourceText}
-                      onChange={setSourceText}
+                      onChange={(next) => {
+                        setSourceText(next)
+                        setSourceDirty(true)
+                      }}
                       theme={isDark ? 'dark' : 'light'}
+                      onSubmit={() => void applySource()}
+                      reveal={reveal}
                     />
                   </div>
                   {sourceError !== null ? (
                     <p className="panel-error" role="alert">
                       {sourceError}
                     </p>
+                  ) : null}
+                  {sourceDirty || isParsing ? (
+                    <footer className="panel-foot">
+                      <span className="panel-foot-hint">
+                        Press Ctrl+Enter to apply
+                      </span>
+                      <button
+                        type="button"
+                        className="control control-primary control-sm"
+                        disabled={isParsing}
+                        onClick={() => void applySource()}
+                      >
+                        {isParsing ? 'Applying…' : 'Apply'}
+                      </button>
+                    </footer>
                   ) : null}
                 </section>
                 <ResizeHandle label="Resize Input" onResize={resizeInput} />
@@ -682,7 +755,9 @@ export default function App() {
                       defaultColDef={defaultColDef}
                       rowClassRules={rowClassRules}
                       rowSelection="single"
-                      onRowClicked={(event) => selectRecord(event.data)}
+                      onCellClicked={(event) =>
+                        selectRecord(event.data, event.colDef.field)
+                      }
                       onRowDoubleClicked={(event) =>
                         inspectRecord(event.data)
                       }
@@ -756,6 +831,10 @@ export default function App() {
           onUpload={uploadFile}
         />
       )}
+
+      {loadProgress !== null ? (
+        <LoadBar label={loadProgress.label} value={loadProgress.value} />
+      ) : null}
 
       <DatasetEditorDialog
         open={editorOpen}

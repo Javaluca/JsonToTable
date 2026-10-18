@@ -4,6 +4,10 @@ export function toJsonText(records: JsonRecord[]): string {
   return JSON.stringify(records, null, 2)
 }
 
+export function toRecordText(record: JsonRecord): string {
+  return JSON.stringify(record, null, 2)
+}
+
 export function downloadName(now: Date = new Date()): string {
   const stamp = now.toISOString().slice(0, 19).replace(/[:T]/g, '-')
   return `result-set-${stamp}.json`

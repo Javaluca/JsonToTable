@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { JsonRecord } from './parse-dataset'
 import { recordFields } from './record-fields'
-import { toJsonText } from './serialize'
+import { toRecordText } from './serialize'
+import { CheckIcon, CopyIcon } from './Icons'
 
 type RecordPanelProps = {
   record: JsonRecord | null
@@ -33,7 +34,7 @@ export default function RecordPanel({
 
   const copyRecord = () => {
     if (record === null) return
-    void onCopy(toJsonText([record])).then((ok) => {
+    void onCopy(toRecordText(record)).then((ok) => {
       if (!ok) return
       setCopied(true)
       window.clearTimeout(timerRef.current)
@@ -45,58 +46,62 @@ export default function RecordPanel({
     <section className="panel-section record-panel" aria-label="Record">
       <header className="panel-head">
         <span>Record</span>
-        {record !== null && !inResultSet ? (
-          <span className="panel-note">filtered out</span>
-        ) : null}
+        <span className="record-head-tail">
+          {record !== null && !inResultSet ? (
+            <span className="panel-note">filtered out</span>
+          ) : null}
+          {record !== null ? (
+            <button
+              type="button"
+              className="record-copy"
+              data-copied={copied}
+              title={copied ? 'Copied' : 'Copy this Record as JSON'}
+              aria-label={copied ? 'Copied' : 'Copy JSON'}
+              onClick={copyRecord}
+            >
+              {copied ? <CheckIcon /> : <CopyIcon />}
+            </button>
+          ) : null}
+        </span>
       </header>
       {record === null ? (
         <p className="panel-empty">
           Pick a row in the table to read every value it holds.
         </p>
       ) : (
-        <>
-          <ul className="record-body">
-            {fields.map((field) => (
-              <li className="record-row" key={field.path}>
-                <span className="record-path">{field.path}</span>
-                {field.options.length === 0 ? (
-                  <span className="record-value-plain">{field.display}</span>
-                ) : field.options.length === 1 ? (
-                  <button
-                    type="button"
-                    className="record-value"
-                    aria-label={`Narrow to ${field.options[0].clause}`}
-                    onClick={() => onNarrow(field.options[0].clause)}
-                  >
-                    {field.display}
-                  </button>
-                ) : (
-                  <span className="record-chips">
-                    {field.options.map((option) => (
-                      <button
-                        type="button"
-                        className="chip"
-                        key={option.clause}
-                        aria-label={`Narrow to ${option.clause}`}
-                        onClick={() => onNarrow(option.clause)}
-                      >
-                        {option.label}
-                      </button>
-                    ))}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-          <pre className="record-raw" aria-label="This Record as JSON">
-            {toJsonText([record])}
-          </pre>
-          <div className="record-actions">
-            <button type="button" className="control control-primary" onClick={copyRecord}>
-              {copied ? 'Copied' : 'Copy JSON'}
-            </button>
-          </div>
-        </>
+        <ul className="record-body">
+          {fields.map((field) => (
+            <li className="record-row" key={field.path}>
+              <span className="record-path">{field.path}</span>
+              {field.options.length === 0 ? (
+                <span className="record-value-plain">{field.display}</span>
+              ) : field.options.length === 1 ? (
+                <button
+                  type="button"
+                  className="record-value"
+                  aria-label={`Narrow to ${field.options[0].clause}`}
+                  onClick={() => onNarrow(field.options[0].clause)}
+                >
+                  {field.display}
+                </button>
+              ) : (
+                <span className="record-chips">
+                  {field.options.map((option) => (
+                    <button
+                      type="button"
+                      className="chip"
+                      key={option.clause}
+                      aria-label={`Narrow to ${option.clause}`}
+                      onClick={() => onNarrow(option.clause)}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </span>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </section>
   )

@@ -1,7 +1,15 @@
-import { parseDataset, type ParseResult } from './parse-dataset'
+import {
+  parseDataset,
+  type ParseProgressSink,
+  type ParseResult,
+} from './parse-dataset'
+import type { WorkerReply } from './parse.worker'
 
 export type DatasetSource = {
-  parse: (text: string) => Promise<ParseResult>
+  parse: (
+    text: string,
+    onProgress?: ParseProgressSink,
+  ) => Promise<ParseResult>
   cancel: () => void
 }
 
@@ -9,9 +17,9 @@ export function createDatasetSource(): DatasetSource {
   let worker: Worker | null = null
 
   return {
-    parse(text) {
+    parse(text, onProgress) {
       if (typeof Worker === 'undefined') {
-        return Promise.resolve(parseDataset(text))
+        return Promise.resolve(parseDataset(text, onProgress))
       }
       worker?.terminate()
       return new Promise<ParseResult>((resolve) => {
@@ -19,10 +27,15 @@ export function createDatasetSource(): DatasetSource {
           type: 'module',
         })
         worker = active
-        active.onmessage = (event: MessageEvent<ParseResult>) => {
+        active.onmessage = (event: MessageEvent<WorkerReply>) => {
+          const reply = event.data
+          if (reply.kind === 'progress') {
+            onProgress?.({ value: reply.value, label: reply.label })
+            return
+          }
           active.terminate()
           if (worker === active) worker = null
-          resolve(event.data)
+          resolve(reply.result)
         }
         active.onerror = () => {
           active.terminate()

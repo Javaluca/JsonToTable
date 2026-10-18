@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parseDataset } from './parse-dataset'
+import { parseDataset, type ParseProgress } from './parse-dataset'
 
 describe('parseDataset', () => {
   it('parses a JSON array of Records', () => {
@@ -54,5 +54,47 @@ describe('parseDataset', () => {
   it('skips blank lines in NDJSON', () => {
     const result = parseDataset('{"id":1}\n\n{"id":2}\n')
     expect(result).toEqual({ ok: true, records: [{ id: 1 }, { id: 2 }] })
+  })
+})
+
+describe('parseDataset progress', () => {
+  function collect(text: string): ParseProgress[] {
+    const seen: ParseProgress[] = []
+    parseDataset(text, (progress) => seen.push(progress))
+    return seen
+  }
+
+  it('counts the Records it checks', () => {
+    const rows = Array.from({ length: 25000 }, (_, id) => `{"id":${id}}`)
+    const seen = collect(`[${rows.join(',')}]`)
+
+    expect(seen.length).toBeGreaterThan(1)
+    expect(seen[0]).toEqual({
+      value: 1 / 25000,
+      label: 'Checking Record 1 of 25000',
+    })
+    for (let i = 1; i < seen.length; i++) {
+      expect(seen[i].value).toBeGreaterThanOrEqual(seen[i - 1].value ?? 0)
+    }
+    expect(seen[seen.length - 1]).toEqual({
+      value: 1,
+      label: 'Checking Record 25000 of 25000',
+    })
+  })
+
+  it('measures NDJSON line by line', () => {
+    const lines = Array.from({ length: 2500 }, (_, id) => `{"id":${id}}`)
+    const seen = collect(lines.join('\n'))
+
+    expect(seen.length).toBeGreaterThan(1)
+    expect(seen[0]).toEqual({ value: 1 / 2500, label: 'Reading line 1 of 2500' })
+    expect(seen[seen.length - 1].value).toBe(1)
+  })
+
+  it('reports both ends of a two-Record Dataset', () => {
+    expect(collect('[{"id":1},{"id":2}]')).toEqual([
+      { value: 0.5, label: 'Checking Record 1 of 2' },
+      { value: 1, label: 'Checking Record 2 of 2' },
+    ])
   })
 })

@@ -1,5 +1,19 @@
-import { parseDataset } from './parse-dataset'
+import {
+  parseDataset,
+  type ParseProgress,
+  type ParseResult,
+} from './parse-dataset'
 
-self.onmessage = (event: MessageEvent<{ text: string }>) => {
-  self.postMessage(parseDataset(event.data.text))
+type WorkerRequest = { text: string }
+
+export type WorkerReply =
+  | ({ kind: 'progress' } & ParseProgress)
+  | { kind: 'result'; result: ParseResult }
+
+self.onmessage = (event: MessageEvent<WorkerRequest>) => {
+  const reply = (message: WorkerReply) => self.postMessage(message)
+  const result = parseDataset(event.data.text, (progress) =>
+    reply({ kind: 'progress', ...progress }),
+  )
+  reply({ kind: 'result', result })
 }

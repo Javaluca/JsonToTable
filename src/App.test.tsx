@@ -170,6 +170,33 @@ describe('App', () => {
     expect(await screen.findByText('1 / 1')).toBeInTheDocument()
   })
 
+  it('offers Apply, at the foot of the Input block, only while there are edits', async () => {
+    render(<App />)
+
+    await loadSampleDataset()
+    expect(
+      screen.queryByRole('button', { name: 'Apply' }),
+    ).not.toBeInTheDocument()
+
+    fireEvent.change(screen.getByLabelText('Dataset source'), {
+      target: { value: '[{"id":1}]' },
+    })
+
+    const apply = screen.getByRole('button', { name: 'Apply' })
+    expect(apply.closest('.panel-foot')).not.toBeNull()
+    expect(
+      within(screen.getByRole('region', { name: 'Input' })).getByText(
+        'Press Ctrl+Enter to apply',
+      ),
+    ).toBeInTheDocument()
+
+    await userEvent.click(apply)
+    expect(await screen.findByText('1 / 1')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('button', { name: 'Apply' }),
+    ).not.toBeInTheDocument()
+  })
+
   it('loads the sample Dataset from the landing hero', async () => {
     render(<App />)
 
@@ -463,6 +490,70 @@ describe('App', () => {
     const list = await openDatasetMenu()
     expect(
       within(list).getByRole('option', { name: /People/ }),
+    ).toBeInTheDocument()
+  })
+
+  it('renames a loaded Dataset from the menu', async () => {
+    render(<App />)
+
+    await pasteDataset('[{"id":1},{"id":2}]')
+    await screen.findByText('2 / 2')
+
+    const list = await openDatasetMenu()
+    await userEvent.click(
+      within(list).getByRole('button', { name: /Rename 2 Records/ }),
+    )
+    const field = within(list).getByLabelText(/Rename 2 Records/)
+    await userEvent.clear(field)
+    await userEvent.type(field, 'People{Enter}')
+
+    expect(
+      within(screen.getByRole('listbox', { name: 'Datasets' })).getByRole(
+        'option',
+        { name: 'People · 2 Records' },
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'Active Dataset: People · 2 Records' }),
+    ).toBeInTheDocument()
+  })
+
+  it('reverts a Dataset name to the derived label when renamed to blank', async () => {
+    render(<App />)
+
+    await pasteDataset('[{"id":1,"name":"Ada"}]')
+    await screen.findByText('1 / 1')
+
+    const list = await openDatasetMenu()
+    await userEvent.click(
+      within(list).getByRole('button', { name: /Rename 1 Record/ }),
+    )
+    const field = within(list).getByLabelText(/Rename 1 Record/)
+    await userEvent.type(field, 'People')
+    await userEvent.tab()
+
+    expect(
+      within(screen.getByRole('listbox', { name: 'Datasets' })).getByRole(
+        'option',
+        { name: 'People · 1 Record' },
+      ),
+    ).toBeInTheDocument()
+
+    await userEvent.click(
+      within(screen.getByRole('listbox', { name: 'Datasets' })).getByRole(
+        'button',
+        { name: 'Rename People · 1 Record' },
+      ),
+    )
+    const again = screen.getByLabelText('Rename People · 1 Record')
+    await userEvent.clear(again)
+    await userEvent.tab()
+
+    expect(
+      within(screen.getByRole('listbox', { name: 'Datasets' })).getByRole(
+        'option',
+        { name: '1 Record · Ada' },
+      ),
     ).toBeInTheDocument()
   })
 

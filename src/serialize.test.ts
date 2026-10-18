@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { JsonRecord } from './parse-dataset'
-import { downloadName, toJsonText } from './serialize'
+import { downloadName, toJsonText, toRecordText } from './serialize'
 
 const RECORDS: JsonRecord[] = [
   { id: 1, name: 'Ada' },
@@ -16,6 +16,12 @@ describe('toJsonText', () => {
 
   it('renders an empty Result Set as an empty array', () => {
     expect(toJsonText([])).toBe('[]')
+  })
+})
+
+describe('toRecordText', () => {
+  it('pretty-prints one Record as a JSON object', () => {
+    expect(toRecordText(RECORDS[0])).toBe('{\n  "id": 1,\n  "name": "Ada"\n}')
   })
 })
 

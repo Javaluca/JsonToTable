@@ -55,14 +55,27 @@ describe('RecordPanel', () => {
   })
 
   it('copies the Record as JSON and says so', async () => {
-    const { onCopy } = renderPanel()
+    const onCopy = vi.fn().mockResolvedValue(true)
+    renderPanel({ onCopy })
 
     await userEvent.click(screen.getByRole('button', { name: 'Copy JSON' }))
 
     expect(onCopy).toHaveBeenCalledWith(
       expect.stringContaining('"name": "Grace Hopper"'),
     )
+    expect(onCopy.mock.calls[0][0].trimStart().startsWith('{')).toBe(true)
     expect(await screen.findByRole('button', { name: 'Copied' })).toBeInTheDocument()
+  })
+
+  it('keeps only the object area, with the copy button in the head', () => {
+    renderPanel()
+
+    const tile = screen.getByRole('region', { name: 'Record' })
+    const copy = screen.getByRole('button', { name: 'Copy JSON' })
+
+    expect(tile.querySelector('.record-raw')).toBeNull()
+    expect(copy.closest('.panel-head')).not.toBeNull()
+    expect(screen.queryByText('filtered out')).not.toBeInTheDocument()
   })
 
   it('stays quiet when the clipboard refuses', async () => {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { SAMPLE_COLOR } from './dataset-colors'
+import { PencilIcon } from './Icons'
 import Logo from './Logo'
 import type { DatasetEntry } from './dataset-store'
 
@@ -11,6 +12,7 @@ type DatasetMenuProps = {
   showSample: boolean
   colorOf: (id: string) => string
   onSelect: (id: string) => void
+  onRename: (id: string, name: string) => void
   onRemove: (id: string) => void
   onLoadSample: () => void
 }
@@ -23,10 +25,14 @@ export default function DatasetMenu({
   showSample,
   colorOf,
   onSelect,
+  onRename,
   onRemove,
   onLoadSample,
 }: DatasetMenuProps) {
   const [open, setOpen] = useState(false)
+  const [editing, setEditing] = useState<{ id: string; draft: string } | null>(
+    null,
+  )
   const rootRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -45,9 +51,25 @@ export default function DatasetMenu({
     }
   }, [open])
 
-  const choose = (action: () => void) => {
+  const close = () => {
     setOpen(false)
+    setEditing(null)
+  }
+
+  const choose = (action: () => void) => {
+    close()
     action()
+  }
+
+  const startRename = (entry: DatasetEntry) => {
+    setEditing({ id: entry.id, draft: entry.name ?? '' })
+  }
+
+  const commitRename = () => {
+    const current = editing
+    setEditing(null)
+    if (current === null) return
+    onRename(current.id, current.draft)
   }
 
   return (
@@ -75,49 +97,99 @@ export default function DatasetMenu({
 
       {open ? (
         <ul className="dataset-list" role="listbox" aria-label="Datasets">
-          {datasets.map((entry) => (
-            <li
-              key={entry.id}
-              className={`dataset-row${
-                entry.id === activeId ? ' dataset-row-active' : ''
-              }`}
-              role="option"
-              aria-label={entry.label}
-              aria-selected={entry.id === activeId}
-              onMouseDown={(event) => event.preventDefault()}
-              onClick={() =>
-                choose(() => {
-                  if (entry.id !== activeId) onSelect(entry.id)
-                })
-              }
-            >
-              <span
-                className="dataset-swatch"
-                style={{ background: colorOf(entry.id) }}
-                aria-hidden="true"
-              />
-              <span className="dataset-item-label">{entry.label}</span>
-              {entry.id === activeId ? (
-                <span className="dataset-check" aria-hidden="true">
-                  ✓
-                </span>
-              ) : (
-                <span className="dataset-check" aria-hidden="true" />
-              )}
-              <button
-                type="button"
-                className="dataset-remove"
-                aria-label={`Remove ${entry.label}`}
-                onMouseDown={(event) => event.preventDefault()}
-                onClick={(event) => {
-                  event.stopPropagation()
-                  onRemove(entry.id)
-                }}
+          {datasets.map((entry) =>
+            editing !== null && editing.id === entry.id ? (
+              <li
+                key={entry.id}
+                className="dataset-row dataset-row-editing"
+                role="presentation"
               >
-                <span aria-hidden="true">×</span>
-              </button>
-            </li>
-          ))}
+                <span
+                  className="dataset-swatch"
+                  style={{ background: colorOf(entry.id) }}
+                  aria-hidden="true"
+                />
+                <input
+                  className="dataset-rename-input"
+                  aria-label={`Rename ${entry.label}`}
+                  placeholder="Dataset name"
+                  value={editing.draft}
+                  autoFocus
+                  onMouseDown={(event) => event.stopPropagation()}
+                  onClick={(event) => event.stopPropagation()}
+                  onChange={(event) =>
+                    setEditing({ id: entry.id, draft: event.target.value })
+                  }
+                  onBlur={commitRename}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      event.preventDefault()
+                      event.currentTarget.blur()
+                    }
+                    if (event.key === 'Escape') {
+                      event.stopPropagation()
+                      setEditing(null)
+                    }
+                  }}
+                />
+              </li>
+            ) : (
+              <li
+                key={entry.id}
+                className={`dataset-row${
+                  entry.id === activeId ? ' dataset-row-active' : ''
+                }`}
+                role="option"
+                aria-label={entry.label}
+                aria-selected={entry.id === activeId}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() =>
+                  choose(() => {
+                    if (entry.id !== activeId) onSelect(entry.id)
+                  })
+                }
+              >
+                <span
+                  className="dataset-swatch"
+                  style={{ background: colorOf(entry.id) }}
+                  aria-hidden="true"
+                />
+                <span className="dataset-item-label">{entry.label}</span>
+                {entry.id === activeId ? (
+                  <span className="dataset-check" aria-hidden="true">
+                    ✓
+                  </span>
+                ) : (
+                  <span className="dataset-check" aria-hidden="true" />
+                )}
+                <button
+                  type="button"
+                  className="dataset-rename"
+                  aria-label={`Rename ${entry.label}`}
+                  title="Rename"
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    startRename(entry)
+                  }}
+                >
+                  <PencilIcon />
+                </button>
+                <button
+                  type="button"
+                  className="dataset-remove"
+                  aria-label={`Remove ${entry.label}`}
+                  onMouseDown={(event) => event.preventDefault()}
+                  onClick={(event) => {
+                    event.stopPropagation()
+                    onRemove(entry.id)
+                  }}
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </li>
+            ),
+          )}
           {showSample ? (
             <>
               {datasets.length > 0 ? (
